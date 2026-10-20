@@ -25,8 +25,7 @@ tracks binding better than scoring a single minimised structure.
 objectives for training conformation generators. In a limited literature search we did not find a
 single framework combining all of: a **policy-gradient sequence optimiser**, a **swappable
 conformational model**, **energy guidance from a differentiable all-atom energy**, and an
-**ensemble-level reward**, applied to **folded protein binders**, but absence from a shallow search
-is weak evidence, and two of our searches failed outright. Treat the combination as a
+**ensemble-level reward**, applied to **folded protein binders**. Treat the combination as a
 recombination of known parts, not a demonstrated novelty. CINDER makes no claim of experimentally
 validated affinity optimisation.
 
