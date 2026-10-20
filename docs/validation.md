@@ -49,6 +49,40 @@ resolution. Neither says anything about binding affinity.
 **Not yet done:** perturbing the binder *sequence* as well. That needs the per-sequence pose
 builder (see `TODO.md`).
 
+## Results: perturb-and-recover, Cartesian vs rigid-body sampling
+
+Protocol as above, binder-only perturbation (2° or 5° rotation × 1 or 2 Å shift, two repeats
+each, plus an unperturbed control), 4000 steps, `λ` ramped 5 → 50, no restraint to the reference.
+"Recovered" means final CA RMSD (target frame) within 0.15 Å of that complex's own control
+(unperturbed) final RMSD, the floor reachable under the same protocol. Reproduce with
+`scripts/structure_recovery.py --complex <ID> [--space rigid]`.
+
+| Complex | Sampling space | Control floor (Å) | Perturbed finals (Å) | Recovered |
+|---|---|---|---|---|
+| 2ZTA (coiled-coil homodimer) | Cartesian | 0.25 | 0.96 – 2.32 | 0 / 8 |
+| 2ZTA | rigid-body | 0.54 | 0.49 – 0.56 | 8 / 8 |
+| 1CDL (calmodulin + peptide) | Cartesian | 0.34 | 0.90 – 1.84 | 0 / 8 |
+| 1CDL | rigid-body | 0.41 | 0.39 – 0.41 | 8 / 8 |
+| 1G5J (Bcl-xL + Bad peptide) | Cartesian | 0.27 | 0.91 – 2.04 | 0 / 5 (run stopped early) |
+| 1G5J | rigid-body | 0.52 | 0.52 – 2.43 | 5 / 8 |
+
+What this does and does not show:
+
+* Moving every atom independently (Cartesian) never returned the binder to the control floor.
+  Moving only the six rigid-body DOFs did in 21 of 24 perturbed runs. The earlier conclusion that
+  the energy "does not discriminate the reference pose" was an artifact of the sampling space.
+* All rigid-body runs preserve the binder's internal geometry exactly (aligned CA RMSD 0.00).
+* On 2ZTA and 1CDL all finals agree to within about 1 REU in interface energy, i.e. a single
+  basin. The floor is 0.4 – 0.5 Å, not 0, because the crystal pose is not TMol's own minimum.
+* The three 1G5J failures (all with the 2 Å shift) end 1.3 – 2.4 Å away in a different basin:
+  weaker interface energy (−38 to −45 vs −63 for the control) but lower repulsion (15 – 20 vs 38),
+  with essentially the same total design energy (159.6 – 161.9 vs 159.5). So under TMol those poses
+  are equally good as the control, not worse: the landscape is nearly degenerate there, or the
+  run was too short or too cold to cross a barrier. Not yet tested: longer runs, restarts.
+* Caveats: three small helical complexes, two repeats per setting, perturbations at most 5° and
+  2 Å, target frozen, and TMol is both guide and judge. The 1G5J Cartesian row used only 5 runs.
+  This validates the energy landscape and the sampler, not ensemble scoring or sequence design.
+
 ## Benchmark complexes
 
 `configs/benchmarks/helical_complexes.yaml` lists helix-rich complexes from the RCSB PDB
