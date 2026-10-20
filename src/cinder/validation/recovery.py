@@ -14,6 +14,7 @@ from torch import Tensor
 
 from cinder.conformations.langevin import LangevinSampler
 from cinder.energy.composite import CompositeEnergy
+from cinder.systems.rigid_body import RigidBodyParametrization
 from cinder.systems.specification import MolecularSystem
 from cinder.types import SequenceBatch
 from cinder.validation.perturb import cartesian_perturb, kabsch_rmsd, rigid_body_perturb, rmsd
@@ -79,6 +80,37 @@ def _terms(
     return {"total": float(out.total[0]), **{k: float(v[0]) for k, v in out.terms.items()}}
 
 
+def _summarize(
+    perturbation: Perturbation,
+    system: MolecularSystem,
+    energy: CompositeEnergy,
+    sequence: SequenceBatch,
+    start: Tensor,
+    final_x: Tensor,
+    atoms: Tensor,
+    m_atoms: Tensor,
+    seconds: float,
+) -> RecoveryResult:
+    ref = system.reference_coordinates
+    return RecoveryResult(
+        perturbation=perturbation,
+        start_rmsd=rmsd(start, ref, m_atoms),
+        final_rmsd=rmsd(final_x, ref, m_atoms),
+        metrics={
+            "ca_aligned": (
+                kabsch_rmsd(start, ref, m_atoms),
+                kabsch_rmsd(final_x, ref, m_atoms),
+            ),
+            "all_atom": (rmsd(start, ref, atoms), rmsd(final_x, ref, atoms)),
+        },
+        start_terms=_terms(energy, system, start, sequence),
+        final_terms=_terms(energy, system, final_x, sequence),
+        seconds=seconds,
+        start_coordinates=start,
+        final_coordinates=final_x,
+    )
+
+
 def run_recovery(
     system: MolecularSystem,
     energy: CompositeEnergy,
@@ -98,22 +130,36 @@ def run_recovery(
     t0 = time.time()
     final = sampler.sample(system, sequence, 1, generator, initial_coordinates=start)
     final_x = final.coordinates[0, 0]
-    return RecoveryResult(
-        perturbation=perturbation,
-        start_rmsd=rmsd(start, ref, m_atoms),
-        final_rmsd=rmsd(final_x, ref, m_atoms),
-        metrics={
-            "ca_aligned": (
-                kabsch_rmsd(start, ref, m_atoms),
-                kabsch_rmsd(final_x, ref, m_atoms),
-            ),
-            "all_atom": (rmsd(start, ref, atoms), rmsd(final_x, ref, atoms)),
-        },
-        start_terms=_terms(energy, system, start, sequence),
-        final_terms=_terms(energy, system, final_x, sequence),
-        seconds=time.time() - t0,
-        start_coordinates=start,
-        final_coordinates=final_x,
+    return _summarize(
+        perturbation, system, energy, sequence, start, final_x, atoms, m_atoms, time.time() - t0
+    )
+
+
+def run_rigid_recovery(
+    system: MolecularSystem,
+    energy: CompositeEnergy,
+    param: RigidBodyParametrization,
+    sampler: LangevinSampler,
+    sequence: SequenceBatch,
+    perturbation: Perturbation,
+    generator: torch.Generator | None = None,
+    metric_atoms: Tensor | None = None,
+) -> RecoveryResult:
+    """Recovery in rigid-body jump space: the binder is displaced by a random 6-DOF jump and
+    ``sampler`` moves only those 6 DOFs. ``sampler`` must be built on the energy
+    ``RigidBodyEnergy(energy, param, system)`` and run on ``param.dof_system(system)``'s
+    coordinates; internal geometry of the moving group is preserved throughout."""
+    if perturbation.kind != "rigid":
+        raise ValueError("run_rigid_recovery needs a 'rigid' perturbation")
+    atoms = param.moving_atoms
+    m_atoms = atoms if metric_atoms is None else metric_atoms
+    q0 = param.dofs(perturbation.rotation_deg, perturbation.translation, generator)
+    start = param.to_cartesian(q0[None])[0]
+    t0 = time.time()
+    final = sampler.sample(param.dof_system(system), sequence, 1, generator, initial_coordinates=q0)
+    final_x = param.to_cartesian(final.coordinates[0, 0][None])[0]
+    return _summarize(
+        perturbation, system, energy, sequence, start, final_x, atoms, m_atoms, time.time() - t0
     )
 
 

@@ -20,6 +20,15 @@ return it toward the reference? Only the binder is perturbed; the target is froz
 4. Report binder RMSD to the reference before/after (no superposition: the target is fixed) and
    the interface energy before/after.
 
+**Sampling spaces** (`--space`). `cartesian` moves every binder atom independently (heats
+stiff bonds, distorts the fold). `rigid` moves only the six binder jump DOFs (translation +
+rotation vector about the binder centroid; `cinder.systems.rigid_body`), so the internal geometry
+is preserved exactly and the sampler explores docking poses. Energy gradients dU/dq are the
+chain rule through the differentiable jump transform and TMol's coordinate autograd
+(`cinder.energy.rigid_body.RigidBodyEnergy`; checked against finite differences on barnase/barstar).
+Rotation is expressed in Å-equivalent units (scaled by the binder's radius of gyration) so one
+step size suits all six dimensions.
+
 **Outputs.** Each invocation creates a new run directory under `runs/` (never overwritten):
 `config.yaml`, `metadata.json` (git commit, versions, seed, input checksum), `results.csv` (one
 row per perturbed run, with *every* energy term before and after: total, interface, repulsion,

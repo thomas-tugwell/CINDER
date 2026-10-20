@@ -210,3 +210,29 @@ def test_ca_atom_indices_point_at_ca_atoms(system, tmp_path):
     names = [ln[12:16].strip() for ln in path.read_text().splitlines() if ln.startswith("ATOM")]
     assert all(names[int(i)] == "CA" for i in ca)
     assert len(system.extras["target_ca_atoms"]) == 108
+
+
+def test_rigid_body_gradient_matches_finite_differences_on_real_complex(system, energy):
+    """dU/dq (6 binder jump DOFs, chained through TMol autograd) vs central differences."""
+    from cinder.energy.rigid_body import RigidBodyEnergy
+    from cinder.systems.rigid_body import RigidBodyParametrization
+
+    param = RigidBodyParametrization(system.reference_coordinates, system.extras["binder_atoms"])
+    wrapped = RigidBodyEnergy(energy, param, system)
+    dof_system = param.dof_system(system)
+    seq = _native(system)
+    q = torch.zeros(1, 6)
+    q[0, :3] = torch.tensor([0.05, -0.04, 0.03])  # a small offset from the reference
+    g = wrapped.gradient(dof_system, q, seq)
+    assert g.shape == (1, 6) and torch.isfinite(g).all()
+
+    def fn(v):
+        return float(wrapped.energy(dof_system, v, seq)[0])
+
+    fd = finite_difference_gradient(fn, q, eps=2e-2)
+    assert torch.allclose(g, fd, rtol=0.05, atol=0.5), (g, fd)
+    # moving the binder rigidly never changes its internal geometry -> strain term is invariant
+    moved = param.to_cartesian(torch.tensor([[1.0, 0.5, -0.5, 2.0, -1.0, 1.0]]))
+    a = energy.evaluate(system, system.reference_coordinates[None], seq).terms["strain"]
+    b = energy.evaluate(system, moved, seq).terms["strain"]
+    assert float(b) == pytest.approx(float(a), rel=1e-3)

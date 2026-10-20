@@ -12,6 +12,7 @@ import torch
 from cinder.config import config_from_dict
 from cinder.conformations import LangevinSampler
 from cinder.conformations.guidance import linear_schedule
+from cinder.energy.rigid_body import RigidBodyEnergy
 from cinder.energy.tmol import build_tmol_design_energy, load_structure_system, write_pdb
 from cinder.experiments.logging import (
     CsvLogger,
@@ -19,8 +20,14 @@ from cinder.experiments.logging import (
     create_run_dir,
     write_run_header,
 )
+from cinder.systems.rigid_body import RigidBodyParametrization
 from cinder.types import SequenceBatch
-from cinder.validation import Perturbation, result_row, run_recovery
+from cinder.validation import (
+    Perturbation,
+    result_row,
+    run_recovery,
+    run_rigid_recovery,
+)
 from cinder.validation.datasets import chain_breaks, load_manifest, prepare_complex
 
 
@@ -36,6 +43,12 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--rot", type=float, nargs="*", default=[3.0], help="rigid rotations (deg)")
     ap.add_argument("--trans", type=float, nargs="*", default=[1.0], help="rigid shifts (Å)")
     ap.add_argument("--cart-noise", type=float, nargs="*", default=[], help="Cartesian σ (Å)")
+    ap.add_argument(
+        "--space",
+        choices=["cartesian", "rigid"],
+        default="cartesian",
+        help="cartesian: every binder atom moves; rigid: only the 6 binder jump DOFs move",
+    )
     ap.add_argument("--n", type=int, default=2, help="repeats per setting")
     ap.add_argument("--steps", type=int, default=3000)
     ap.add_argument("--step-size", type=float, default=2e-5)
@@ -85,8 +98,10 @@ def main() -> None:
     seq = SequenceBatch(system.design_space.native_tokens()[None])
     atoms = system.extras["binder_atoms"]
     ca_atoms = system.extras["binder_ca_atoms"]
+    param = RigidBodyParametrization(system.reference_coordinates, atoms)
+    sampled_energy = RigidBodyEnergy(energy, param, system) if args.space == "rigid" else energy
     sampler = LangevinSampler.from_energy(
-        energy,
+        sampled_energy,
         strength=linear_schedule(args.lam0, args.lam1),
         step_size=args.step_size,
         n_steps=args.steps,
@@ -94,10 +109,11 @@ def main() -> None:
     )
     gen = torch.Generator().manual_seed(args.seed)
     perturbations = [Perturbation("rigid", r, t) for r in args.rot for t in args.trans]
-    perturbations += [Perturbation("cartesian", sigma=s) for s in args.cart_noise]
+    if args.space == "cartesian":
+        perturbations += [Perturbation("cartesian", sigma=s) for s in args.cart_noise]
 
     complex_id = args.complex.upper() if args.complex else Path(pdb_path).stem
-    run_dir = create_run_dir(args.output_dir, f"recovery_{complex_id}")
+    run_dir = create_run_dir(args.output_dir, f"recovery_{args.space}_{complex_id}")
     config = {**vars(args), "pdb_path": pdb_path, "target": target_chains, "binder": binder_chains}
     write_run_header(run_dir, config, collect_metadata(args.seed, pdb_path))
     results = CsvLogger(run_dir / "results.csv")
@@ -114,7 +130,12 @@ def main() -> None:
     print("|---|---|---|---|---|---|")
     for p in perturbations:
         for k in range(args.n):
-            r = run_recovery(system, energy, sampler, seq, p, atoms, gen, metric_atoms=ca_atoms)
+            if args.space == "rigid":
+                r = run_rigid_recovery(
+                    system, energy, param, sampler, seq, p, gen, metric_atoms=ca_atoms
+                )
+            else:
+                r = run_recovery(system, energy, sampler, seq, p, atoms, gen, metric_atoms=ca_atoms)
             stem = f"{complex_id}_{p.slug()}_{k}"
             write_pdb(system, r.start_coordinates, structures / f"{stem}_start.pdb")
             write_pdb(system, r.final_coordinates, structures / f"{stem}_final.pdb")

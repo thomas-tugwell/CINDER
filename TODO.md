@@ -9,8 +9,13 @@ Status as of 2026-10-20. Milestones 0, 1, 2, 3, 4 (toy only) and 5 (toy only) ar
 sequences. `energy/tmol.py` evaluates the native sequence only and raises
 `SequenceMismatchError` for anything else. The toy loop works; the real-complex loop does not.
 
+**Progress:** steps 1, 2 and 4 below are done in `energy/tmol_mutation.py`
+(`TMolSequenceBuilder`: mutation + repack, cache, single-structure `score`; see `docs/tmol.md`).
+Remaining: ensemble sampling per mutant sequence, coordinate representation across sequences,
+wiring into `run_design`.
+
 Steps:
-1. Add a per-sequence pose builder in `energy/tmol.py`. Use `tmol.pack.PackerTask` with
+1. (done) Add a per-sequence pose builder. Use `tmol.pack.PackerTask` with
    `restrict_to_repacking` on non-design residues and `restrict_absent_name3s` at design
    positions, then `pack_rotamers`. Cache poses by sequence string.
 2. Build a `TMolContext` per sequence (target pose is shared; binder and complex poses change).
@@ -22,6 +27,19 @@ Steps:
 5. Then ensemble scoring per sequence, then wire into `run_design` and the CLI.
 6. Run policy optimization on barnase/barstar design positions. A sanity check is that known
    favourable or unfavourable mutations move in the expected direction.
+
+## 1b. Priorities requested by the project owner
+
+1. **Rigid-body (jump) DOFs** (done as of this version: `systems/rigid_body.py`,
+   `energy/rigid_body.py`, `--space rigid` in the recovery script). Next: use jump-space ensembles
+   as the conformational model inside the sequence loop, and compare against TMol's own native
+   fold-forest jumps (`MoveMap`, `run_kin_min`) as a cross-check.
+2. **Separate `hbond` and `fa_elec` rewards** (second priority). `fa_elec` stands in for a
+   salt-bridge term; no custom term is needed. Add them as separately weighted design-energy
+   terms (config `hbond_weight`, `elec_weight`), log them per term, and report hbond/elec in the
+   run CSVs. Needs care: decompose into interface contributions like `interface` does.
+3. Torsion-space moves (phi/psi/chi via TMol `MoveMap` / `set_named_torsions`) for flexible
+   binders without bond heating, and torsion perturbations for benchmarks.
 
 ## 2. Benchmarks (the scientific question)
 

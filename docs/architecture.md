@@ -22,7 +22,8 @@ REINFORCE + entropy     SequenceTrainer       optimization/{reinforce, trainer}.
 * All interfaces and containers live in `src/cinder/types.py`.
 * `sequence/` imports nothing about energies. `conformations/` never imports an energy
   implementation; it receives an `EnergyModel` (via `EnergyGuidance`) from the caller.
-* TMol is imported **only** in `energy/tmol.py` (and lazily from the runner).
+* TMol is imported **only** in `energy/tmol*.py` (`tmol.py`, `tmol_mutation.py`) and lazily from
+  the runner.
 * `experiments/runner.py` is the single place concrete classes are wired together;
   `cli.py` is a thin wrapper around it.
 

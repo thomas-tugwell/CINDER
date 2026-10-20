@@ -11,3 +11,4 @@ runs/
 *.pt
 .DS_Store
 ._*
+data/

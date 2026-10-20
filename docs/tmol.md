@@ -19,16 +19,32 @@ isolated score function; decomposition equals the manual computation; batch == s
 autograd gradients agree with central finite differences on the largest-gradient atoms;
 restrained binder-only Langevin stays bound and clash-free.
 
-## Variable atom count (important limitation)
+## Variable atom count and sequence-specific poses
 
 Mutating $\mathrm{Ala}\to\mathrm{Trp}$ changes the atom set, so one coordinate tensor cannot be
-shared across sequences. The adapter therefore fixes topology to the **native sequence**
-and raises `SequenceMismatchError` for any other. Consequently the *TMol-driven sequence
-optimisation loop is not yet runnable on a real complex*; the toy loop is. Planned route
-(not implemented): build a per-sequence pose with `tmol.pack.PackerTask.restrict_absent_name3s`
-at design positions + `pack_rotamers`, cache by sequence, and adopt a fixed-size coordinate
-representation (atom14 / frames / torsions, `systems/structure.py`) for sequence-conditioned
-generative models.
+shared across sequences. `TMolGroupEnergy` therefore stays tied to one topology and raises
+`SequenceMismatchError` for any other sequence. Sequence changes are handled one level up by
+`energy/tmol_mutation.py::TMolSequenceBuilder`:
+
+* It builds one full-atom pose per sequence with TMol's packer (`PackerTask` +
+  `pack_rotamers`), with the backbone fixed and the side chains in a **fixed repack region**
+  optimised (`design` positions only, `neighbors` within a cutoff of any design residue, or
+  `all`). The region depends only on the design positions, so every sequence, **including the
+  native one, goes through the same protocol**; compare mutants to the repacked native, not to
+  the raw input pose (repacking alone can change the energy a lot: raw 2ZTA total 392.9 vs
+  repacked about -1).
+* Rotamers come from the Dunbrack sampler, `IncludeCurrentSampler`, and `FixedAAChiSampler`.
+  The last is required for Ala/Gly (no chi angles): without it the packer **silently keeps the
+  original residue**. The builder checks every design residue after packing and raises
+  `MutationError` if it is not what was requested.
+* Chain sub-poses of the packed complex share its coordinates exactly, so the interface
+  decomposition still holds. Poses are cached by sequence string (about 0.4 s each for a
+  62-residue complex on CPU).
+* `builder.score(seq)` returns the single-structure `interface`, `repulsion` and `strain` terms.
+  This is the "one structure per sequence" baseline for the ensemble comparison.
+
+Not yet done: sampling an *ensemble* per mutant sequence (the builder gives the starting pose),
+and a fixed-size coordinate representation so one batch can span many sequences.
 
 ## Caveats
 

@@ -64,8 +64,8 @@ class MutantPoses:
 
 
 def _residue_range(system: MolecularSystem, key: str) -> tuple[int, int]:
-    lo, hi = system.extras[key]  # type: ignore[misc]
-    return int(lo), int(hi)
+    value: Any = system.extras[key]
+    return int(value[0]), int(value[1])
 
 
 class TMolSequenceBuilder:
