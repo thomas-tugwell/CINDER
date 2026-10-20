@@ -16,8 +16,17 @@
 
 CINDER is a research framework for testing one hypothesis: that ranking and optimising binder
 sequences using an **ensemble** of conformations, scored by a differentiable energy (TMol),
-tracks binding better than scoring a single minimised structure. It does not claim novelty,
-and it makes no claim of experimentally validated affinity optimisation.
+tracks binding better than scoring a single minimised structure.
+
+**Novelty, stated carefully.** Each ingredient is established (see [Related work](#related-work)).
+However, in a limited literature search we did not find prior work that combines all of these in
+one framework: a **policy-gradient sequence optimiser**, a **swappable conformational model**
+(Langevin, flow, diffusion, BioEmu-style), **energy guidance from a differentiable all-atom
+energy**, and an **ensemble-level reward**, applied to **folded protein binders**. To our
+knowledge this combination is probably new, but that is an unverified belief from a shallow
+search, not an established fact. CINDER does not claim novelty for any single component and makes
+no claim of experimentally validated affinity optimisation. The real-complex design loop is not
+yet runnable (see [TODO.md](TODO.md)).
 
 ```mermaid
 flowchart LR
@@ -109,6 +118,25 @@ configs/  docs/  examples/  tests/  assets/
       adapter currently evaluates the native sequence only ([docs/tmol.md](docs/tmol.md))
 - [ ] Protein-scale learned conformational models; diffusion / flow matching; BioEmu2 prior
 - [ ] Benchmarks: single structure vs ensemble; guided vs unguided; vs random / MPNN proposals
+
+## Related work
+
+Prior art we found for individual pieces (not exhaustive):
+
+- Ensemble-aware binder design: [ProChoreo](https://www.biorxiv.org/content/10.64898/2026.01.23.701298.full.pdf),
+  [AlloGen](https://arxiv.org/html/2606.05474).
+- Gradient-based sequence design over simulated ensembles (disordered proteins):
+  [Nature Comput. Sci. 2025](https://www.nature.com/articles/s43588-025-00881-y).
+- Energy/force-guided conformation sampling:
+  [ConfDiff](https://arxiv.org/html/2403.14088v2),
+  [energy-based diffusion Boltzmann generators](https://arxiv.org/abs/2401.02080).
+- Single-structure backpropagation objectives (BindCraft-style), reviewed in
+  [AI-driven binder design](https://spj.science.org/doi/10.34133/csbj.0070).
+- TMol itself: [IPD Rosetta reimplementation](https://pypi.org/project/tmol/).
+
+Not yet searched, and likely to contain relevant prior art: Rosetta multistate and backrub-ensemble
+design, Boltzmann-weighted / free-energy design objectives, and RL or DPO fine-tuning of protein
+models. A full literature review is required before any publication claim.
 
 ## Documentation
 
