@@ -98,3 +98,11 @@ def test_log_prob_unsupported():
     sampler = LangevinSampler.from_energy(HarmonicEnergy())
     with pytest.raises(UnsupportedOperation):
         sampler.log_prob(make_toy_system(), _seq(1), torch.zeros(1, 2))
+
+
+def test_initial_coordinates_override():
+    system = make_toy_system(dim=2)
+    sampler = LangevinSampler.from_energy(HarmonicEnergy(1.0), step_size=0.01, n_steps=0)
+    x0 = torch.tensor([5.0, -5.0])
+    out = sampler.sample(system, _seq(2), 3, initial_coordinates=x0)
+    assert out.coordinates.shape == (2, 3, 2) and torch.equal(out.coordinates[0, 0], x0)

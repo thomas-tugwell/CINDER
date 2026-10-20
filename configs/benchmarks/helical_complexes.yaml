@@ -1,0 +1,20 @@
+# Helix-rich complexes from the RCSB PDB (public domain), fetched at run time.
+# Helical fractions (biotite P-SEA, target / binder) measured on the downloaded entries.
+# Excluded: 1PQ1 (Bcl-xL/Bim) has a 33 A gap in the target chain (residues 28-78), which TMol
+# would bridge with a stretched bond; use `chain_breaks()` to screen new candidates.
+complexes:
+  - id: 2ZTA
+    target_chains: [A]
+    binder_chains: [B]
+    description: GCN4 leucine zipper (parallel coiled-coil homodimer); ~94% / ~90% helix
+    tags: [helical, coiled-coil]
+  - id: 1CDL
+    target_chains: [A]
+    binder_chains: [E]
+    description: Calmodulin with a CaM-kinase peptide; ~62% / ~84% helix
+    tags: [helical, peptide-binder]
+  - id: 1G5J
+    target_chains: [A]
+    binder_chains: [B]
+    description: Bcl-xL with Bad BH3 peptide; ~58% / ~52% helix
+    tags: [helical, peptide-binder]

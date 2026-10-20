@@ -19,6 +19,7 @@ from cinder.energy.tmol import (
     build_tmol_design_energy,
     load_structure_system,
     tmol_available,
+    write_pdb,
 )
 from cinder.types import SequenceBatch
 
@@ -178,3 +179,34 @@ def test_local_ensemble_is_physically_sensible(system, cfg):
     assert (out_terms["interface"] - ref_terms["interface"]).abs().max() < 15
     assert out_terms["repulsion"].max() < ref_terms["repulsion"] + 20
     assert (out_terms["restraint"] < 50).all()
+
+
+def test_write_pdb_roundtrip_preserves_atom_order_and_coordinates(system, tmp_path):
+    """A written pose re-reads with the same atom count and (to PDB precision) coordinates."""
+    import tmol
+
+    x = system.reference_coordinates.clone()
+    path = write_pdb(system, x, tmp_path / "ref.pdb")
+    assert path.exists()
+    reread = tmol.pose_stack_from_pdb(str(path), system.reference_coordinates.device)
+    assert reread.coords.shape[1] == x.shape[0]
+    assert torch.allclose(reread.coords[0], x, atol=2e-3)  # PDB stores 3 decimals
+
+
+def test_write_pdb_perturbed_differs_and_validates_shape(system, tmp_path):
+    x = system.reference_coordinates.clone()
+    x[system.extras["binder_atoms"]] += 1.0
+    a = write_pdb(system, system.reference_coordinates, tmp_path / "a.pdb").read_text()
+    b = write_pdb(system, x, tmp_path / "b.pdb").read_text()
+    assert a != b and a.count("ATOM") == b.count("ATOM")
+    with pytest.raises(ValueError, match="expected coordinates"):
+        write_pdb(system, x[:10], tmp_path / "bad.pdb")
+
+
+def test_ca_atom_indices_point_at_ca_atoms(system, tmp_path):
+    ca = system.extras["binder_ca_atoms"]
+    assert len(ca) == system.design_space.length  # one CA per binder residue
+    path = write_pdb(system, system.reference_coordinates, tmp_path / "ref.pdb")
+    names = [ln[12:16].strip() for ln in path.read_text().splitlines() if ln.startswith("ATOM")]
+    assert all(names[int(i)] == "CA" for i in ca)
+    assert len(system.extras["target_ca_atoms"]) == 108

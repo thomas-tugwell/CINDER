@@ -214,6 +214,19 @@ def _residue_atom_indices(pose: Any, lo: int, hi: int) -> Tensor:
     return torch.arange(start, stop)
 
 
+def _ca_atom_indices(pose: Any, lo: int, hi: int) -> Tensor:
+    """Indices (into the complex's atom axis) of the CA atom of residues ``lo..hi-1``."""
+    bts = pose.packed_block_types.active_block_types
+    off = pose.block_coord_offset[0].long()
+    idx = []
+    for i in range(lo, hi):
+        bt = bts[int(pose.block_type_ind[0, i])]
+        if "CA" not in bt.atom_to_idx:
+            raise ValueError(f"residue {i} ({bt.name}) has no CA atom")
+        idx.append(int(off[i]) + int(bt.atom_to_idx["CA"]))
+    return torch.tensor(idx, dtype=torch.long)
+
+
 def _one_letter(pose: Any, lo: int, hi: int) -> str:
     bts = pose.packed_block_types.active_block_types
     out = []
@@ -221,6 +234,28 @@ def _one_letter(pose: Any, lo: int, hi: int) -> str:
         name = bts[int(pose.block_type_ind[0, i])].name
         out.append(_THREE_TO_ONE.get(name.split(":")[0], "X"))
     return "".join(out)
+
+
+def _sync_subpose(pose: Any, sub: Any, atoms: Tensor, lo: int, hi: int, name: str) -> Any:
+    """Make ``sub`` (a chain read on its own) share the complex's coordinates exactly.
+
+    Heavy atoms missing from the file are rebuilt by TMol and can be placed differently when a
+    chain is read alone vs. inside the complex, which would break the interface decomposition
+    ``E(complex) - E(target) - E(binder)``. Topology (atom counts per residue) must agree; the
+    coordinates are then overwritten with the complex's.
+    """
+    import attr  # noqa: PLC0415  (a TMol dependency)
+
+    same_counts = torch.equal(sub.n_ats_per_block[0].long(), pose.n_ats_per_block[0, lo:hi].long())
+    if sub.coords.shape[1] != len(atoms) or not same_counts:
+        raise ValueError(f"{name} sub-pose topology does not match the complex")
+    shared = pose.coords[0, atoms.to(pose.device)].detach().clone()[None]
+    n_diff = int((sub.coords[0] - shared[0]).norm(dim=-1).gt(1e-3).sum())
+    if n_diff:
+        log.warning(
+            "%s: %d rebuilt atoms differed between sub-pose and complex; synced", name, n_diff
+        )
+    return attr.evolve(sub, coords=shared)
 
 
 def load_structure_system(sc: SystemConfig, device: str = "cpu") -> MolecularSystem:
@@ -243,11 +278,8 @@ def load_structure_system(sc: SystemConfig, device: str = "cpu") -> MolecularSys
     binder = tmol.pose_stack_from_pdb(str(path), dev, residue_start=b_lo, residue_end=b_hi)
     t_atoms = _residue_atom_indices(pose, t_lo, t_hi)
     b_atoms = _residue_atom_indices(pose, b_lo, b_hi)
-    for name, sub, atoms in (("target", target, t_atoms), ("binder", binder, b_atoms)):
-        if sub.coords.shape[1] != len(atoms) or not torch.allclose(
-            sub.coords[0].cpu(), pose.coords[0, atoms].cpu(), atol=1e-3
-        ):
-            raise ValueError(f"{name} sub-pose does not match the complex atom-for-atom")
+    target = _sync_subpose(pose, target, t_atoms, t_lo, t_hi, "target")
+    binder = _sync_subpose(pose, binder, b_atoms, b_lo, b_hi, "binder")
 
     native = _one_letter(pose, b_lo, b_hi)
     if sc.native_sequence and sc.native_sequence != native:
@@ -273,8 +305,37 @@ def load_structure_system(sc: SystemConfig, device: str = "cpu") -> MolecularSys
         structure_path=path,
         structure_sha256=sha256_file(path),
         move_mask=move_mask,
-        extras={"tmol": ctx, "binder_atoms": b_atoms, "target_atoms": t_atoms},
+        extras={
+            "tmol": ctx,
+            "binder_atoms": b_atoms,
+            "target_atoms": t_atoms,
+            "binder_residue_range": (b_lo, b_hi),
+            "target_residue_range": (t_lo, t_hi),
+            "binder_ca_atoms": _ca_atom_indices(pose, b_lo, b_hi),
+            "target_ca_atoms": _ca_atom_indices(pose, t_lo, t_hi),
+        },
     )
+
+
+def write_pdb(system: MolecularSystem, coordinates: Tensor, path: str | Path) -> Path:
+    """Write ``coordinates`` (``[n_atoms, 3]``, TMol atom order) as a PDB of the complex.
+
+    Atom order, residues and chains are those of the loaded complex, so files written from the
+    reference, a perturbed start and a final pose superimpose directly. Hydrogens are included.
+    """
+    import attr  # noqa: PLC0415  (a TMol dependency)
+
+    tmol = _import_tmol()
+    ctx: TMolContext = system.extras["tmol"]  # type: ignore[assignment]
+    if tuple(coordinates.shape) != system.coord_shape:
+        raise ValueError(
+            f"expected coordinates {system.coord_shape}, got {tuple(coordinates.shape)}"
+        )
+    pose = attr.evolve(ctx.poses["complex"], coords=coordinates.detach().to(ctx.device)[None])
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmol.write_pose_stack_pdb(pose, str(out))
+    return out
 
 
 def build_tmol_design_energy(ec: EnergyConfig, system: MolecularSystem) -> CompositeEnergy:
@@ -305,4 +366,5 @@ __all__ = [
     "load_structure_system",
     "tmol_available",
     "tmol_device",
+    "write_pdb",
 ]

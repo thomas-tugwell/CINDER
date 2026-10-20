@@ -61,7 +61,8 @@ Nothing here exists yet. Needs step 1 first.
 - Selectable per-term subsets via config (term groups are currently hard-coded constants).
 - GPU validation; all TMol tests so far ran on CPU.
 - Chains must be contiguous residue blocks in the PDB; relax this or add a reorder helper.
-- Write sampled ensembles to `runs/<id>/structures/` (directory is created but unused).
+- Write sampled ensembles from `cinder design` to `runs/<id>/structures/` (the recovery script now
+  writes PDBs there via `write_pdb`; design runs do not yet).
 
 ## 6. Repository housekeeping
 

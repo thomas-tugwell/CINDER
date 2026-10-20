@@ -65,14 +65,24 @@ class LangevinSampler:
         sequence: SequenceBatch,
         n_samples: int,
         generator: torch.Generator | None = None,
+        initial_coordinates: Tensor | None = None,
     ) -> ConformationBatch:
+        """``initial_coordinates`` (``coord_shape`` or ``[B, K, *coord_shape]``) overrides the
+        default start of ``reference_coordinates + init_std * noise``."""
         b = len(sequence)
         ref = system.reference_coordinates
         seq = sequence.repeat_interleave(n_samples)
-        x = ref.expand(b * n_samples, *ref.shape).clone()
+        if initial_coordinates is None:
+            x = ref.expand(b * n_samples, *ref.shape).clone()
+        else:
+            x0 = initial_coordinates.to(ref)
+            if x0.shape == ref.shape:
+                x0 = x0.expand(b, n_samples, *ref.shape)
+            x = x0.reshape(b * n_samples, *ref.shape).clone()
         mask = None if system.move_mask is None else system.move_mask.to(x)
-        init_noise = torch.randn(x.shape, generator=generator, device=x.device)
-        x = x + self.init_std * (init_noise if mask is None else init_noise * mask)
+        if initial_coordinates is None:
+            init_noise = torch.randn(x.shape, generator=generator, device=x.device)
+            x = x + self.init_std * (init_noise if mask is None else init_noise * mask)
         eta = self.step_size
         for step in range(self.n_steps):
             t = step / max(self.n_steps - 1, 1)
