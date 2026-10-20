@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 120" width="320" height="120" role="img" aria-label="CINDER logo">
+  <title>CINDER</title>
+  <g fill="none" stroke-linecap="round">
+    <!-- faint ensemble of binder traces -->
+    <path d="M58 78 C70 40 100 34 118 52" stroke="#d9622b" stroke-opacity=".18" stroke-width="3"/>
+    <path d="M58 78 C72 52 98 28 120 46" stroke="#d9622b" stroke-opacity=".18" stroke-width="3"/>
+    <path d="M58 78 C66 30 108 40 116 60" stroke="#d9622b" stroke-opacity=".18" stroke-width="3"/>
+    <path d="M58 78 C76 46 96 44 122 56" stroke="#d9622b" stroke-opacity=".18" stroke-width="3"/>
+    <!-- mean binder trace -->
+    <path d="M58 78 C70 46 98 38 119 51" stroke="#d9622b" stroke-width="4"/>
+  </g>
+  <!-- target -->
+  <circle cx="86" cy="78" r="30" fill="none" stroke="#2f4858" stroke-width="4"/>
+  <circle cx="86" cy="78" r="16" fill="none" stroke="#2f4858" stroke-width="2" stroke-opacity=".5"/>
+  <circle cx="119" cy="51" r="5" fill="#d9622b"/>
+  <text x="150" y="82" font-family="Helvetica, Arial, sans-serif" font-size="40" font-weight="600" letter-spacing="3" fill="#2f4858">CINDER</text>
+</svg>

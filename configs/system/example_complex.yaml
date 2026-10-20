@@ -1,0 +1,9 @@
+# Barnase (chain A, target) / barstar (chain D, binder) from PDB 1BRS. Requires TMol.
+system:
+  kind: structure
+  name: barnase_barstar
+  structure_path: tests/fixtures/barnase_barstar_AD.pdb
+  target_chains: [A]
+  binder_chains: [D]
+  design_positions: [29, 33, 34]   # 0-based indices into the binder sequence
+  movable: binder

@@ -1,0 +1,4 @@
+sequence:
+  backend: categorical
+  init: uniform
+  entropy_weight: 0.01

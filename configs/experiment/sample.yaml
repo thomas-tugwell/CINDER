@@ -1,0 +1,5 @@
+# Local TMol-guided ensemble around the crystal pose:  cinder sample --config configs/experiment/sample.yaml
+defaults: [system/example_complex, energy/tmol_default, sampler/langevin]
+name: sample_barnase_barstar
+conformation:
+  n_samples: 4

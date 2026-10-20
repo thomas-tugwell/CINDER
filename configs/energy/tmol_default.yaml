@@ -1,0 +1,8 @@
+energy:
+  backend: tmol
+  interface_weight: 1.0
+  repulsion_weight: 1.0
+  strain_weight: 0.1
+  restraint_weight: 0.5
+  options:
+    restraint_k: 1.0

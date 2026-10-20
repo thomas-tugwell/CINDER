@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "CINDER: ensemble-aware binder sequence design framework"
+type: software
+version: 0.1.0
+authors:
+  - family-names: Tugwell
+    given-names: Thomas
+repository-code: "https://github.com/thomas-tugwell/CINDER"
+license: Apache-2.0

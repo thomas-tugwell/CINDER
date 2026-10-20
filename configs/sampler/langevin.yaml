@@ -1,0 +1,7 @@
+conformation:
+  backend: langevin
+  n_samples: 8
+  guidance_strength: 2.0   # lambda
+  step_size: 1.0e-4
+  n_steps: 30
+  init_std: 0.0

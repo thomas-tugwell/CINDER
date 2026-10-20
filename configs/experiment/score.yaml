@@ -1,0 +1,3 @@
+# Score the native barnase/barstar complex with TMol:  cinder score --config configs/experiment/score.yaml
+defaults: [system/example_complex, energy/tmol_default]
+name: score_barnase_barstar
