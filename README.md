@@ -86,6 +86,57 @@ Policy loss: $-(R-b)\log q_\phi(S)-\alpha H[q_\phi]$. See [docs/theory.md](docs/
 | Conditional normalising flow (toy coordinates) | implemented, tested against $-\log Z$ |
 | Diffusion, flow matching, BioEmu2 adapter | interfaces + experimental stubs |
 
+## Validation
+
+What has been verified, and what has not. Numbers come from `python scripts/validation_report.py`
+(seeded, CPU, about a minute; the TMol rows need TMol installed).
+
+**Verified on analytic toy problems with known answers.** These test the machinery (samplers,
+guidance, flow objective, policy gradient), not protein biology.
+
+| Check | Measured | Expected |
+|---|---|---|
+| Langevin, harmonic: variance | 0.1670 | 0.1667 |
+| Guided product of Gaussians: mean | 1.4914 | 1.5000 |
+| Guided product of Gaussians: variance | 0.2686 | 0.2500 |
+| Double well: fraction in right well | 0.508 | 0.500 |
+| Flow, Gaussian: final loss vs bound −log Z | −1.1391 | −1.1447 (bound) |
+| Flow, bimodal: final loss vs −log Z | 0.0751 | 0 (bound) |
+| Flow, bimodal: fraction in right mode | 0.505 | 0.500 |
+| Policy: consensus sequence | IR | IR (brute force over 400) |
+| Policy: mean reward, last 10 iterations | 2.195 | 2.214 (analytic optimum) |
+| Policy: entropy first → last iteration | 5.99 → 0.11 | decreasing |
+
+The guided variance is about 7% high, consistent with the O(η) bias of unadjusted Langevin plus
+Monte Carlo error. The bimodal flow loss sits 0.075 above its bound, i.e. both modes are
+covered but the fit is not exact.
+
+**Verified: the TMol evaluator on barnase/barstar (PDB 1BRS, native pose).** Autograd
+coordinate gradients match central finite differences on the largest-gradient atoms:
+
+| Term | Weighted value |
+|---|---|
+| interface | −62.93 |
+| repulsion | 6.99 |
+| strain | 231.08 |
+| restraint | 0.00 |
+
+| Coordinate | Autograd dU/dx | Finite difference |
+|---|---|---|
+| atom 2733, axis y | −72.044 | −72.043 |
+| atom 2745, axis y | 66.310 | 66.315 |
+| atom 2745, axis x | −14.158 | −14.046 |
+| atom 2733, axis x | 11.868 | 11.874 |
+| atom 864, axis z | −8.192 | −8.200 |
+| atom 1677, axis z | 7.394 | 7.396 |
+
+**Not verified.**
+- The full loop on a real complex. The TMol adapter evaluates the native sequence only, so no
+  sequence has been designed against a real structure.
+- Anything about binding affinity. No experimental data have been compared.
+- That ensemble scoring beats single-structure scoring. This is the hypothesis, not a result.
+- Learned protein-scale models, diffusion, flow matching and BioEmu2 (stubs).
+
 ## Quick start
 
 ```bash
