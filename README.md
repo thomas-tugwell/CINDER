@@ -22,7 +22,7 @@ tracks binding better than scoring a single minimised structure.
 (see [Related work](#related-work)): ensemble-averaged design with a Rosetta-family energy
 (RosettaBackrub, multistate design), energy-based preference optimisation for complexes
 (EnerBridge-DPO), reinforcement learning for binders (ProtRL), and Boltzmann-style ensemble
-objectives for training conformation generators. In a limited literature search we did not find a
+objectives for training conformation generators. In a limited literature search I did not find a
 single framework combining all of: a **policy-gradient sequence optimiser**, a **swappable
 conformational model**, **energy guidance from a differentiable all-atom energy**, and an
 **ensemble-level reward**, applied to **folded protein binders**. Treat the combination as a
@@ -230,7 +230,7 @@ scripts/  configs/  docs/  examples/  tests/  assets/        (runs/ and data/ ar
 
 ## Related work
 
-Prior art we found (not exhaustive):
+Prior art (not exhaustive):
 
 - Ensemble-aware binder design: [ProChoreo](https://www.biorxiv.org/content/10.64898/2026.01.23.701298.full.pdf),
   [AlloGen](https://arxiv.org/html/2606.05474).
