@@ -13,21 +13,19 @@ Only ``energy/tmol*.py`` modules may import TMol.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import torch
 from torch import Tensor
 
 from cinder.energy.tmol import (
-    INTERFACE_TERMS,
-    REPULSION_TERMS,
-    STRAIN_TERMS,
     TMolContext,
-    TMolGroupEnergy,
+    _ca_atom_indices,
     _import_tmol,
     _residue_atom_indices,
     _sync_subpose,
+    group_energies,
 )
 from cinder.systems.specification import MolecularSystem
 from cinder.types import AA_TO_INDEX, SequenceBatch, encode_sequence
@@ -91,6 +89,7 @@ class TMolSequenceBuilder:
         self.t_lo, self.t_hi = _residue_range(system, "target_residue_range")
         self.repack, self.cutoff, self.seed = repack, cutoff, seed
         self._cache: dict[str, MutantPoses] = {}
+        self._systems: dict[str, MolecularSystem] = {}
         self._repack_mask = self._compute_repack_mask()
         self._design_blocks = [self.b_lo + p for p in system.design_space.positions]
 
@@ -205,22 +204,41 @@ class TMolSequenceBuilder:
         (target, t_atoms), (binder, b_atoms) = out
         return target, binder, t_atoms, b_atoms
 
+    def system_for(self, sequence: str) -> MolecularSystem:
+        """A :class:`MolecularSystem` for ``sequence``'s packed pose: its coordinates, TMol
+        context and atom index sets (binder/target/CA), cached. Atom indices differ between
+        sequences because mutations change atom counts, so always use this system, never the
+        native one, with a mutant's coordinates."""
+        if sequence in self._systems:
+            return self._systems[sequence]
+        mutant = self.build(sequence)
+        ctx = mutant.context
+        extras = dict(self.system.extras)
+        extras.update(
+            tmol=ctx,
+            binder_atoms=ctx.atoms["binder"],
+            target_atoms=ctx.atoms["target"],
+            binder_ca_atoms=_ca_atom_indices(mutant.complex, self.b_lo, self.b_hi),
+            target_ca_atoms=_ca_atom_indices(mutant.complex, self.t_lo, self.t_hi),
+        )
+        system = replace(
+            self.system, reference_coordinates=mutant.coordinates, move_mask=None, extras=extras
+        )
+        self._systems[sequence] = system
+        return system
+
     # ------------------------------------------------------------------------- scoring
 
     def score(self, sequence: str) -> dict[str, float]:
-        """Unweighted-by-design (TMol-weighted) term values for the packed single structure:
-        ``interface``, ``repulsion`` (both decomposed) and ``strain`` (complex)."""
+        """TMol-weighted term values of the packed single structure, one per entry of
+        :data:`cinder.energy.tmol.TERM_GROUPS` (``interface``, ``repulsion``, ``strain``,
+        ``hbond``, ``elec``, ``internal``), plus ``n_atoms``."""
         mutant = self.build(sequence)
         tokens = encode_sequence(sequence)[None]
         seq = SequenceBatch(tokens)
         x = mutant.coordinates[None]
         out: dict[str, float] = {}
-        for name, terms, decompose in (
-            ("interface", INTERFACE_TERMS, True),
-            ("repulsion", REPULSION_TERMS, True),
-            ("strain", STRAIN_TERMS, False),
-        ):
-            model = TMolGroupEnergy(mutant.context, terms, tokens[0], decompose)
+        for name, model in group_energies(mutant.context, tokens[0]).items():
             out[name] = float(model.energy(self.system, x, seq)[0])
         out["n_atoms"] = float(x.shape[1])
         return out

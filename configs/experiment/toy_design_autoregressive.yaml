@@ -1,0 +1,29 @@
+name: toy_design_autoregressive
+seed: 0
+device: cpu
+
+system:
+  kind: toy
+  binder_length: 3
+  toy_dim: 2
+
+energy:
+  backend: toy_sequence
+  toy_seed: 0
+
+conformation:
+  backend: langevin
+  n_samples: 8
+  guidance_strength: 1.0
+  step_size: 0.05
+  n_steps: 60
+
+sequence:
+  backend: autoregressive   # each position conditioned on earlier ones
+  entropy_weight: 0.01
+
+optimization:
+  batch_size: 32
+  learning_rate: 0.1
+  iterations: 150
+  aggregator: mean

@@ -113,3 +113,11 @@ def test_ensemble_objective_shapes_and_reward_sign():
     assert res.energies.shape == (3, 5) and res.reward.shape == (3,)
     assert torch.allclose(res.reward, -(0.5 * x.pow(2).sum(-1)).mean(1))
     assert res.terms["h"].shape == (3, 5)
+
+
+def test_design_weights_include_hbond_and_elec_terms_only_when_nonzero():
+    models = {n: HarmonicEnergy() for n in ("interface", "hbond", "elec")}
+    default = build_design_energy(models, DesignEnergyWeights())
+    assert [t.name for t in default.terms] == ["interface"]  # extra terms default to weight 0
+    on = build_design_energy(models, DesignEnergyWeights(hbond=2.0, elec=0.5))
+    assert {t.name: t.weight for t in on.terms} == {"interface": 1.0, "hbond": 2.0, "elec": 0.5}

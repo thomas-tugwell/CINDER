@@ -10,13 +10,15 @@ TMol order (hydrogens included). Topology is therefore fixed to the **native seq
 for a different sequence raises :class:`SequenceMismatchError`. Evaluating mutated sequences
 requires rebuilding the pose (see ``docs/tmol.md``, "Variable atom count").
 
-Design-energy terms (see :func:`build_tmol_design_energy`):
+Design-energy terms (assembled in :mod:`cinder.energy.tmol_design`):
 
 * ``interface``  -- ``E_group(complex) - E_group(target) - E_group(binder)`` over the pairwise
   physics terms (LJ attraction, solvation, electrostatics, H-bonds, LK-ball). Intra-chain
   contributions cancel exactly because all three poses share coordinates.
 * ``repulsion``  -- the same decomposition for ``fa_ljrep`` alone.
 * ``strain``     -- covalent-geometry / torsion terms of the complex (not decomposed).
+* ``internal``   -- every pairwise and geometry term of the binder alone: keeps a flexible binder
+  folded (the interface decomposition removes intra-chain energy by construction).
 * ``restraint``  -- harmonic tether to the reference pose (backend independent).
 """
 
@@ -24,6 +26,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
+from dataclasses import dataclass
 from importlib import util
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -32,16 +35,13 @@ import torch
 from torch import Tensor
 
 from cinder.energy.base import autograd_gradient
-from cinder.energy.composite import CompositeEnergy
-from cinder.energy.restraints import HarmonicRestraint
-from cinder.objectives.interface import DesignEnergyWeights, build_design_energy
 from cinder.systems.design_space import DesignSpace
 from cinder.systems.specification import MolecularSystem
 from cinder.types import SequenceBatch, decode_sequence
 from cinder.utils.io import sha256_file
 
 if TYPE_CHECKING:
-    from cinder.config import EnergyConfig, SystemConfig
+    from cinder.config import SystemConfig
 
 log = logging.getLogger("cinder.tmol")
 
@@ -50,10 +50,56 @@ INTERFACE_TERMS = (
     "lk_ball_iso", "lk_ball", "lk_bridge", "lk_bridge_uncpl",
 )  # fmt: skip
 REPULSION_TERMS = ("fa_ljrep",)
+HBOND_TERMS = ("hbond",)
+ELEC_TERMS = ("fa_elec",)
 STRAIN_TERMS = (
     "cart_lengths", "cart_angles", "cart_torsions", "cart_impropers", "cart_hxltorsions",
     "rama", "omega", "dunbrack_rot", "dunbrack_rotdev", "dunbrack_semirot",
 )  # fmt: skip
+
+
+SCOPES = ("interface", "complex", "binder")
+INTERNAL_TERMS = INTERFACE_TERMS + REPULSION_TERMS + STRAIN_TERMS
+
+
+@dataclass(frozen=True)
+class TermGroup:
+    """A named group of TMol score terms and the part of the system it is evaluated on.
+
+    ``scope``: ``interface`` = ``E(complex) - E(target) - E(binder)`` (binder-target interactions
+    only), ``complex`` = the whole complex, ``binder`` = the binder alone (its internal energy,
+    which the interface decomposition removes by construction).
+    """
+
+    terms: tuple[str, ...]
+    scope: str
+
+    def __post_init__(self) -> None:
+        if self.scope not in SCOPES:
+            raise ValueError(f"scope must be one of {SCOPES}, got {self.scope!r}")
+
+
+# The single definition of the named energy terms. ``interface`` already contains ``hbond`` and
+# ``fa_elec``; the separate ``hbond`` / ``elec`` groups let them be weighted *in addition*
+# (default weight 0, so the default design energy is unchanged).
+TERM_GROUPS: dict[str, TermGroup] = {
+    "interface": TermGroup(INTERFACE_TERMS, "interface"),
+    "repulsion": TermGroup(REPULSION_TERMS, "interface"),
+    "strain": TermGroup(STRAIN_TERMS, "complex"),
+    "hbond": TermGroup(HBOND_TERMS, "interface"),
+    "elec": TermGroup(ELEC_TERMS, "interface"),
+    # the binder's own energy: keeps a flexible binder folded (needed for torsion/chi DOFs)
+    "internal": TermGroup(INTERNAL_TERMS, "binder"),
+}
+
+
+def group_energies(context: TMolContext, native_tokens: Tensor) -> dict[str, TMolGroupEnergy]:
+    """One :class:`TMolGroupEnergy` per entry of :data:`TERM_GROUPS` for ``context``."""
+    return {
+        name: TMolGroupEnergy(context, g.terms, native_tokens, g.scope)
+        for name, g in TERM_GROUPS.items()
+    }
+
 
 _THREE_TO_ONE = {
     "ALA": "A", "CYS": "C", "ASP": "D", "GLU": "E", "PHE": "F", "GLY": "G", "HIS": "H",
@@ -84,9 +130,11 @@ def _import_tmol() -> Any:
 
 
 def tmol_device(requested: str) -> torch.device:
-    """TMol runs on CPU or CUDA; anything else (e.g. MPS) falls back to CPU."""
-    if requested.startswith("cuda") and torch.cuda.is_available():
-        return torch.device(requested)
+    """TMol runs on CPU or CUDA. ``auto`` picks CUDA when available, else CPU; an explicit
+    ``cuda`` name is honoured when CUDA exists; anything else (including MPS) falls back to CPU."""
+    wants_cuda = requested == "auto" or requested.startswith("cuda")
+    if wants_cuda and torch.cuda.is_available():
+        return torch.device("cuda" if requested == "auto" else requested)
     return torch.device("cpu")
 
 
@@ -149,20 +197,22 @@ class TMolContext:
 
 
 class TMolGroupEnergy:
-    """Energy of a named group of TMol score terms, optionally interface-decomposed."""
+    """Energy of a named group of TMol score terms on a given ``scope`` (see :class:`TermGroup`)."""
 
     def __init__(
         self,
         context: TMolContext,
         terms: Iterable[str],
         native_binder_tokens: Tensor,
-        decompose: bool,
+        scope: str,
     ) -> None:
+        if scope not in SCOPES:
+            raise ValueError(f"scope must be one of {SCOPES}, got {scope!r}")
         self.ctx = context
         self.terms = tuple(terms)
         self.rows = context.term_rows(self.terms)
         self.native = native_binder_tokens
-        self.decompose = decompose
+        self.scope = scope
 
     def _check_sequence(self, sequence: SequenceBatch) -> None:
         native = self.native.to(sequence.tokens.device)
@@ -178,8 +228,11 @@ class TMolGroupEnergy:
         self, system: MolecularSystem, coordinates: Tensor, sequence: SequenceBatch
     ) -> Tensor:
         self._check_sequence(sequence)
+        if self.scope == "binder":
+            sub = self.ctx.split(coordinates, "binder")
+            return self.ctx.scores("binder", sub)[self.rows].sum(0)
         total = self.ctx.scores("complex", coordinates)[self.rows].sum(0)
-        if self.decompose:
+        if self.scope == "interface":
             for which in ("target", "binder"):
                 sub = self.ctx.split(coordinates, which)
                 total = total - self.ctx.scores(which, sub)[self.rows].sum(0)
@@ -338,31 +391,15 @@ def write_pdb(system: MolecularSystem, coordinates: Tensor, path: str | Path) ->
     return out
 
 
-def build_tmol_design_energy(ec: EnergyConfig, system: MolecularSystem) -> CompositeEnergy:
-    """``U_design`` from TMol interface / repulsion / strain terms plus a harmonic restraint."""
-    ctx: TMolContext = system.extras["tmol"]  # type: ignore[assignment]
-    native = system.design_space.native_tokens()
-    models = {
-        "interface": TMolGroupEnergy(ctx, INTERFACE_TERMS, native, decompose=True),
-        "repulsion": TMolGroupEnergy(ctx, REPULSION_TERMS, native, decompose=True),
-        "strain": TMolGroupEnergy(ctx, STRAIN_TERMS, native, decompose=False),
-        "restraint": HarmonicRestraint(float(ec.options.get("restraint_k", 1.0))),
-    }
-    weights = DesignEnergyWeights(
-        interface=ec.interface_weight,
-        repulsion=ec.repulsion_weight,
-        strain=ec.strain_weight,
-        restraint=ec.restraint_weight,
-    )
-    return build_design_energy(models, weights)  # type: ignore[arg-type]
-
-
 __all__ = [
+    "SCOPES",
+    "TERM_GROUPS",
+    "TermGroup",
+    "group_energies",
     "SequenceMismatchError",
     "TMolContext",
     "TMolGroupEnergy",
     "TMolUnavailableError",
-    "build_tmol_design_energy",
     "load_structure_system",
     "tmol_available",
     "tmol_device",

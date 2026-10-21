@@ -39,3 +39,24 @@ def test_cli_config_error_exit_code(tmp_path):
     cfg = tmp_path / "bad.yaml"
     cfg.write_text("nonsense: 1\n")
     assert main(["score", "--config", str(cfg)]) == 2
+
+
+def test_device_resolution_prefers_gpu_only_when_asked_and_available(monkeypatch):
+    from cinder.energy.tmol import tmol_device
+    from cinder.utils.device import resolve_device
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(torch.backends.mps, "is_available", lambda: False)
+    assert resolve_device("auto").type == "cpu" and tmol_device("auto").type == "cpu"
+    assert tmol_device("cuda").type == "cpu"  # asked for CUDA, none present -> CPU
+    assert tmol_device("cpu").type == "cpu" and tmol_device("mps").type == "cpu"
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    assert resolve_device("auto").type == "cuda" and tmol_device("auto").type == "cuda"
+    assert tmol_device("cuda:1") == torch.device("cuda:1")
+    assert tmol_device("cpu").type == "cpu"  # explicit CPU is respected even with a GPU
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(torch.backends.mps, "is_available", lambda: True)
+    assert resolve_device("auto").type == "mps"  # toy path may use MPS
+    assert tmol_device("auto").type == "cpu"  # TMol has no MPS backend

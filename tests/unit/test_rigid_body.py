@@ -19,6 +19,8 @@ from cinder.validation.perturb import rotation_matrix
 
 from ..conftest import make_toy_system
 
+DT = torch.float64
+
 
 def _system(n=12, seed=0):
     g = torch.Generator().manual_seed(seed)
@@ -173,3 +175,67 @@ def test_dof_system_is_six_dimensional_and_keeps_original():
     assert ds.coord_shape == (N_RIGID_DOF,) and ds.move_mask is None
     assert ds.extras["cartesian_system"] is system
     assert math.isclose(float(ds.reference_coordinates.abs().sum()), 0.0)
+
+
+class _LinearFirst:
+    """A stand-in torsion-like parametrization: coordinates = reference + q @ basis."""
+
+    def __init__(self, reference, k, seed=0):
+        g = torch.Generator().manual_seed(seed)
+        self.reference = reference
+        self.basis = torch.randn(k, reference.numel(), generator=g, dtype=reference.dtype) * 0.1
+        self._k = k
+
+    @property
+    def n_dofs(self):
+        return self._k
+
+    def to_cartesian(self, q):
+        return self.reference[None] + (q.to(self.reference.dtype) @ self.basis).reshape(
+            q.shape[0], *self.reference.shape
+        )
+
+    def dof_system(self, system):
+        raise NotImplementedError
+
+
+def test_composed_parametrization_applies_first_then_rigid_and_has_correct_gradients():
+    from cinder.systems.rigid_body import ComposedParametrization
+
+    system = _system()
+    ref = system.reference_coordinates
+    rigid = RigidBodyParametrization(ref, torch.arange(8))
+    first = _LinearFirst(ref, k=4)
+    comp = ComposedParametrization(first, rigid)
+    assert comp.n_dofs == 4 + N_RIGID_DOF
+    q = torch.randn(2, comp.n_dofs, dtype=DT) * 0.3
+    expected = rigid.apply(first.to_cartesian(q[:, :4]), q[:, 4:])
+    assert torch.allclose(comp.to_cartesian(q), expected)
+    with pytest.raises(ValueError):
+        comp.to_cartesian(torch.zeros(1, 3, dtype=DT))
+
+    from cinder.energy.parametrized import CoordinateParametrization, ParametrizedEnergy
+
+    assert isinstance(comp, CoordinateParametrization)
+    target = _system()
+    target.reference_coordinates = ref + 0.5
+    wrapped = ParametrizedEnergy(_Fixed(HarmonicRestraint(k=1.5), target), comp, system)
+    dof_system = comp.dof_system(system)
+    g = wrapped.gradient(dof_system, q[:1], _seq())
+    fd = finite_difference_gradient(
+        lambda v: wrapped.energy(dof_system, v, _seq())[0], q[:1], eps=1e-6
+    )
+    assert torch.allclose(g, fd, atol=1e-5)
+    assert comp.dof_system(system).coord_shape == (comp.n_dofs,)
+    from cinder.energy.rigid_body import RigidBodyEnergy
+
+    assert RigidBodyEnergy is ParametrizedEnergy  # descriptive alias kept
+
+
+def test_rigid_apply_to_arbitrary_coordinates_is_consistent_with_to_cartesian():
+    system = _system()
+    p = RigidBodyParametrization(system.reference_coordinates, torch.arange(6))
+    q = torch.randn(3, N_RIGID_DOF, dtype=DT) * 0.2
+    via_apply = p.apply(system.reference_coordinates.expand(3, *system.coord_shape), q)
+    assert torch.allclose(via_apply, p.to_cartesian(q))
+    assert p.n_dofs == N_RIGID_DOF

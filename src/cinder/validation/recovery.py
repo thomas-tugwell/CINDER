@@ -14,6 +14,7 @@ from torch import Tensor
 
 from cinder.conformations.langevin import LangevinSampler
 from cinder.energy.composite import CompositeEnergy
+from cinder.energy.parametrized import CoordinateParametrization
 from cinder.systems.rigid_body import RigidBodyParametrization
 from cinder.systems.specification import MolecularSystem
 from cinder.types import SequenceBatch
@@ -22,22 +23,36 @@ from cinder.validation.perturb import cartesian_perturb, kabsch_rmsd, rigid_body
 
 @dataclass(frozen=True)
 class Perturbation:
-    """``kind``: ``rigid`` (rotation_deg, translation) or ``cartesian`` (sigma)."""
+    """``kind``: ``rigid`` (rotation_deg, translation), ``cartesian`` (sigma, Å) or ``torsion``
+    (sigma_deg: std of noise added to every selected torsion; needs a torsion parametrization) or
+    ``torsion_rigid`` (sigma_deg plus a rigid jump of rotation_deg / translation)."""
 
     kind: str
     rotation_deg: float = 0.0
     translation: float = 0.0
     sigma: float = 0.0
+    sigma_deg: float = 0.0
 
     def label(self) -> str:
         if self.kind == "rigid":
             return f"rigid {self.rotation_deg:g}° / {self.translation:g} Å"
+        if self.kind == "torsion":
+            return f"torsion σ={self.sigma_deg:g}°"
+        if self.kind == "torsion_rigid":
+            return (
+                f"torsion σ={self.sigma_deg:g}° + rigid {self.rotation_deg:g}° / "
+                f"{self.translation:g} Å"
+            )
         return f"cartesian σ={self.sigma:g} Å"
 
     def slug(self) -> str:
         """Filesystem-safe identifier, e.g. ``rigid_r2_t1`` or ``cart_s0.5``."""
         if self.kind == "rigid":
             return f"rigid_r{self.rotation_deg:g}_t{self.translation:g}"
+        if self.kind == "torsion":
+            return f"tors_s{self.sigma_deg:g}"
+        if self.kind == "torsion_rigid":
+            return f"tors_s{self.sigma_deg:g}_r{self.rotation_deg:g}_t{self.translation:g}"
         return f"cart_s{self.sigma:g}"
 
     def apply(
@@ -47,7 +62,10 @@ class Perturbation:
             return rigid_body_perturb(coords, atoms, self.rotation_deg, self.translation, generator)
         if self.kind == "cartesian":
             return cartesian_perturb(coords, atoms, self.sigma, generator)
-        raise ValueError(f"unknown perturbation kind {self.kind!r}")
+        raise ValueError(
+            f"perturbation kind {self.kind!r} cannot be applied in Cartesian space "
+            "(torsion perturbations need a torsion parametrization)"
+        )
 
 
 @dataclass
@@ -135,6 +153,35 @@ def run_recovery(
     )
 
 
+def run_dof_recovery(
+    system: MolecularSystem,
+    energy: CompositeEnergy,
+    param: CoordinateParametrization,
+    sampler: LangevinSampler,
+    sequence: SequenceBatch,
+    perturbation: Perturbation,
+    q0: Tensor,
+    atoms: Tensor,
+    generator: torch.Generator | None = None,
+    metric_atoms: Tensor | None = None,
+) -> RecoveryResult:
+    """Recovery in the DOF space of ``param`` (rigid-body jumps, torsions, or both).
+
+    The system starts at ``q0``; ``sampler`` moves only those DOFs and must be built on
+    ``ParametrizedEnergy(energy, param, system)`` and run on ``param.dof_system(system)``.
+    ``atoms`` are the atoms perturbed (for the all-atom RMSD); ``metric_atoms`` (default
+    ``atoms``) selects the primary RMSD, typically the binder CA atoms.
+    """
+    m_atoms = atoms if metric_atoms is None else metric_atoms
+    start = param.to_cartesian(q0[None])[0]
+    t0 = time.time()
+    final = sampler.sample(param.dof_system(system), sequence, 1, generator, initial_coordinates=q0)
+    final_x = param.to_cartesian(final.coordinates[0, 0][None])[0]
+    return _summarize(
+        perturbation, system, energy, sequence, start, final_x, atoms, m_atoms, time.time() - t0
+    )
+
+
 def run_rigid_recovery(
     system: MolecularSystem,
     energy: CompositeEnergy,
@@ -145,22 +192,15 @@ def run_rigid_recovery(
     generator: torch.Generator | None = None,
     metric_atoms: Tensor | None = None,
 ) -> RecoveryResult:
-    """Recovery in rigid-body jump space: the binder is displaced by a random 6-DOF jump and
-    ``sampler`` moves only those 6 DOFs. ``sampler`` must be built on the energy
-    ``RigidBodyEnergy(energy, param, system)`` and run on ``param.dof_system(system)``'s
-    coordinates; internal geometry of the moving group is preserved throughout."""
+    """Recovery in rigid-body jump space: a random 6-DOF jump, then sampling of those DOFs only
+    (the binder's internal geometry is preserved throughout)."""
     if perturbation.kind != "rigid":
         raise ValueError("run_rigid_recovery needs a 'rigid' perturbation")
-    atoms = param.moving_atoms
-    m_atoms = atoms if metric_atoms is None else metric_atoms
     q0 = param.dofs(perturbation.rotation_deg, perturbation.translation, generator)
-    start = param.to_cartesian(q0[None])[0]
-    t0 = time.time()
-    final = sampler.sample(param.dof_system(system), sequence, 1, generator, initial_coordinates=q0)
-    final_x = param.to_cartesian(final.coordinates[0, 0][None])[0]
-    return _summarize(
-        perturbation, system, energy, sequence, start, final_x, atoms, m_atoms, time.time() - t0
-    )
+    return run_dof_recovery(
+        system, energy, param, sampler, sequence, perturbation, q0, param.moving_atoms,
+        generator, metric_atoms,
+    )  # fmt: skip
 
 
 def result_row(complex_id: str, repeat: int, result: RecoveryResult) -> dict[str, object]:

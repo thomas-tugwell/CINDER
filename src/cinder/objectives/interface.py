@@ -20,6 +20,10 @@ class DesignEnergyWeights:
     repulsion: float = 1.0
     strain: float = 0.0
     restraint: float = 0.5
+    hbond: float = 0.0  # extra emphasis on top of ``interface`` (which already contains hbond)
+    elec: float = 0.0  # extra emphasis on top of ``interface`` (fa_elec stands in for salt bridges)
+    hbond_graph: float = 0.0  # differentiable first/second-shell H-bond graph
+    internal: float = 0.0  # the binder's own energy (keeps flexible binders folded)
     extra: dict[str, float] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, float]:
@@ -28,6 +32,10 @@ class DesignEnergyWeights:
             "repulsion": self.repulsion,
             "strain": self.strain,
             "restraint": self.restraint,
+            "hbond": self.hbond,
+            "elec": self.elec,
+            "hbond_graph": self.hbond_graph,
+            "internal": self.internal,
             **self.extra,
         }
 

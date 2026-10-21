@@ -72,18 +72,30 @@ class RigidBodyParametrization:
             rotation_scale = float((moving - self.centroid).pow(2).sum(-1).mean().sqrt())
         self.rotation_scale = max(float(rotation_scale), 1.0)
 
+    @property
+    def n_dofs(self) -> int:
+        return N_RIGID_DOF
+
+    def apply(self, coords: Tensor, q: Tensor) -> Tensor:
+        """Apply the jumps ``q`` ``[N, 6]`` to ``coords`` ``[N, n_atoms, 3]`` (any coordinates, not
+        only the reference): ``x' = R (x - c) + c + t`` on the moving atoms about the *reference*
+        centroid ``c``. Differentiable in both arguments."""
+        if q.ndim != 2 or q.shape[1] != N_RIGID_DOF:
+            raise ValueError(f"q must be [N, {N_RIGID_DOF}], got {tuple(q.shape)}")
+        t, omega = q[:, :3], q[:, 3:] / self.rotation_scale
+        rot = rotation_from_vector(omega)  # [N, 3, 3]
+        c = self.centroid.to(q)
+        moved = (coords[:, self.moving_atoms] - c) @ rot.transpose(1, 2) + c + t[:, None, :]
+        out = coords.clone()
+        out[:, self.moving_atoms] = moved
+        return out
+
     def to_cartesian(self, q: Tensor) -> Tensor:
         """``q`` ``[N, 6]`` -> coordinates ``[N, n_atoms, 3]`` (differentiable in ``q``)."""
         if q.ndim != 2 or q.shape[1] != N_RIGID_DOF:
             raise ValueError(f"q must be [N, {N_RIGID_DOF}], got {tuple(q.shape)}")
         ref = self.reference.to(q)
-        t, omega = q[:, :3], q[:, 3:] / self.rotation_scale
-        rot = rotation_from_vector(omega)  # [N, 3, 3]
-        c = self.centroid.to(q)
-        moved = (ref[self.moving_atoms] - c) @ rot.transpose(1, 2) + c + t[:, None, :]
-        out = ref.expand(q.shape[0], *ref.shape).clone()
-        out[:, self.moving_atoms] = moved
-        return out
+        return self.apply(ref.expand(q.shape[0], *ref.shape), q)
 
     def dofs(
         self,
@@ -109,6 +121,36 @@ class RigidBodyParametrization:
         return replace(
             system,
             reference_coordinates=torch.zeros(N_RIGID_DOF),
+            move_mask=None,
+            extras={**system.extras, "cartesian_system": system},
+        )
+
+
+class ComposedParametrization:
+    """Torsion-type DOFs followed by a rigid-body jump: ``q = [q_first (k), q_rigid (6)]``.
+
+    ``first`` maps its DOFs to coordinates (e.g. binder torsions); the rigid jump is then applied
+    on top about the reference centroid. Both parts stay differentiable.
+    """
+
+    def __init__(self, first, rigid: RigidBodyParametrization) -> None:  # noqa: ANN001
+        self.first = first
+        self.rigid = rigid
+
+    @property
+    def n_dofs(self) -> int:
+        return int(self.first.n_dofs) + N_RIGID_DOF
+
+    def to_cartesian(self, q: Tensor) -> Tensor:
+        if q.ndim != 2 or q.shape[1] != self.n_dofs:
+            raise ValueError(f"q must be [N, {self.n_dofs}], got {tuple(q.shape)}")
+        k = int(self.first.n_dofs)
+        return self.rigid.apply(self.first.to_cartesian(q[:, :k]), q[:, k:])
+
+    def dof_system(self, system: MolecularSystem) -> MolecularSystem:
+        return replace(
+            system,
+            reference_coordinates=torch.zeros(self.n_dofs),
             move_mask=None,
             extras={**system.extras, "cartesian_system": system},
         )

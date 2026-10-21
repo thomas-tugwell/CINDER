@@ -1,0 +1,55 @@
+# TMol sequence design on barnase (target, chain A) / barstar (binder, chain D).
+# Each sampled sequence gets its own packed pose and a jump-space (rigid-body) ensemble; the
+# policy is trained on the ensemble-averaged design energy. Needs TMol; CPU, minutes per run.
+#   cinder design --config configs/experiment/design_tmol.yaml
+name: design_tmol
+seed: 0
+device: cpu
+
+system:
+  kind: structure
+  name: barnase_barstar
+  structure_path: tests/fixtures/barnase_barstar_AD.pdb
+  target_chains: [A]
+  binder_chains: [D]
+  # 0-based indices into the binder chain: barstar hotspots Y29, N33, D35, D39, E76
+  design_positions: [28, 32, 34, 38, 73]
+  forbidden_aa: CP
+
+energy:
+  backend: tmol
+  interface_weight: 1.0
+  repulsion_weight: 1.0
+  strain_weight: 0.1
+  restraint_weight: 0.0   # no tether to the crystal pose
+  hbond_weight: 0.5       # extra emphasis on TMol hbond (already inside interface)
+  elec_weight: 0.25       # fa_elec stands in for salt bridges
+  hbond_graph_weight: 0.5 # first/second-shell H-bond graph
+  options:
+    hbond_graph:
+      w_first: 1.0
+      w_second: 0.5
+      w_coop: 0.25
+      w_unsat: 0.5
+
+conformation:
+  backend: rigid_langevin
+  n_samples: 4
+  guidance_strength: 2.0
+  step_size: 1.0e-4
+  n_steps: 40
+  init_std: 0.3
+  options:
+    repack: neighbors
+    repack_cutoff: 6.0
+
+sequence:
+  backend: categorical
+  init: native
+  entropy_weight: 0.01
+
+optimization:
+  batch_size: 4
+  learning_rate: 0.1
+  iterations: 3
+  aggregator: mean

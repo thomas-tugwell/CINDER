@@ -23,6 +23,8 @@ def test_unknown_key_rejected():
         {"sequence": {"init": "random"}},
         {"system": {"kind": "structure"}},
         {"energy": {"backend": "magic"}},
+        {"energy": {"hbond_weight": -1.0}},
+        {"energy": {"elec_weight": -0.1}},
     ],
 )
 def test_validation_errors(bad):
@@ -46,3 +48,14 @@ def test_repo_configs_load():
     root = Path(__file__).resolve().parents[2] / "configs" / "experiment"
     for p in root.glob("[!._]*.yaml"):
         load_config(p)
+
+
+def test_hbond_graph_options_are_validated():
+    from cinder.energy.tmol_design import graph_config_from_options
+
+    cfg = graph_config_from_options({"hbond_graph": {"w_second": 2.0}})
+    assert cfg.w_second == 2.0 and cfg.w_first == 1.0
+    with pytest.raises(ValueError, match="unknown"):
+        graph_config_from_options({"hbond_graph": {"w_secnd": 1.0}})
+    with pytest.raises(ConfigError):
+        config_from_dict({"energy": {"hbond_graph_weight": -1.0}})

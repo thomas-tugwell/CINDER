@@ -52,12 +52,19 @@ class EnergyConfig:
     repulsion_weight: float = 1.0
     strain_weight: float = 0.0
     restraint_weight: float = 0.5
+    hbond_weight: float = 0.0  # extra weight on the hbond term (already inside interface)
+    elec_weight: float = 0.0  # extra weight on fa_elec (stands in for salt bridges)
+    hbond_graph_weight: float = 0.0  # first/second-shell H-bond graph (see options['hbond_graph'])
+    internal_weight: float = 0.0  # binder-alone energy; use > 0 with torsion/chi DOFs
     toy_seed: int = 0
     options: dict[str, Any] = field(default_factory=dict)
 
     def validate(self) -> None:
         if self.backend not in {"toy_sequence", "tmol"}:
             raise ConfigError(f"unknown energy.backend {self.backend!r}")
+        extra = (self.hbond_weight, self.elec_weight, self.hbond_graph_weight, self.internal_weight)
+        if min(extra) < 0:
+            raise ConfigError("hbond/elec/hbond_graph/internal weights must be >= 0")
 
 
 @dataclass
@@ -80,11 +87,13 @@ class ConformationConfig:
 
 @dataclass
 class SequenceConfig:
-    backend: str = "categorical"
+    backend: str = "categorical"  # "categorical" | "autoregressive"
     init: str = "uniform"  # "uniform" | "native"
     entropy_weight: float = 0.01
 
     def validate(self) -> None:
+        if self.backend not in {"categorical", "autoregressive"}:
+            raise ConfigError("sequence.backend must be 'categorical' or 'autoregressive'")
         if self.init not in {"uniform", "native"}:
             raise ConfigError("sequence.init must be 'uniform' or 'native'")
         if self.entropy_weight < 0:

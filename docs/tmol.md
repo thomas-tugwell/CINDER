@@ -46,6 +46,45 @@ shared across sequences. `TMolGroupEnergy` therefore stays tied to one topology 
 Not yet done: sampling an *ensemble* per mutant sequence (the builder gives the starting pose),
 and a fixed-size coordinate representation so one batch can span many sequences.
 
+## Design-energy terms
+
+| Term | Scope | Contents |
+|---|---|---|
+| `interface` | `E(complex) - E(target) - E(binder)` | ljatr, lk, elec, hbond, lk_ball, lk_bridge terms |
+| `repulsion` | same | `fa_ljrep` |
+| `strain` | complex | cart_*, rama, omega, dunbrack_* |
+| `hbond`, `elec` | same as interface | extra emphasis on `hbond` / `fa_elec` (already inside `interface`; weight 0 by default; `fa_elec` stands in for salt bridges) |
+| `internal` | binder alone | every pairwise and geometry term of the binder; **required for torsion/chi DOFs** |
+| `restraint` | backend independent | harmonic tether to the reference |
+| `hbond_graph` | backend independent | first/second-shell graph, see [hbond_graph.md](hbond_graph.md) |
+
+The definitions live in one table (`TERM_GROUPS` in `energy/tmol.py`) shared by the design energy
+and the mutant scorer. The design energy is assembled in `energy/tmol_design.py`.
+
+**Why `internal` matters.** The interface decomposition removes all intra-chain energy, so nothing
+holds a *flexible* binder's own fold together. Torsion-space sampling without it unwound the helix
+(1° torsion noise: CA RMSD 1.99 to 4.23 Å, fold distortion 1.02 to 2.92 Å); with it the same sampler
+repaired it (1.99 to 0.90 Å, fold 1.02 to 0.51 Å). It is a regression test.
+
+## Degrees of freedom
+
+* **Cartesian:** every atom (heats stiff bonds).
+* **Rigid-body jumps** (`systems/rigid_body.py`): 6 DOFs, internal geometry fixed.
+* **Torsions** (`energy/tmol_torsion.py`): selected binder phi/psi (or chi) angles via TMol's
+  differentiable forward kinematics. Bond lengths and angles stay fixed; the target never moves.
+  Independent per-angle noise compounds along a helix like a lever (10° on every angle moved a
+  31-residue helix by 17 Å RMSD), so perturbations must be about 1° or correlated.
+* **Composed** (`ComposedParametrization`): torsions followed by a rigid jump.
+
+All implement `CoordinateParametrization`; `ParametrizedEnergy` chains any coordinate energy's
+gradient through them. Uses TMol's `MoveMap`, `MinimizerMap`, `PoseStackKinematicsModule`,
+`FoldForest` and `inverse_kin`; these are TMol-version sensitive and confined to `energy/tmol*.py`.
+
+## Devices
+
+`device: cpu` is the default. `device: auto` selects CUDA, then CPU for TMol (TMol has no MPS
+backend), and CUDA, then MPS, then CPU for toy systems.
+
 ## Caveats
 
 * Cartesian Langevin on all atoms heats stiff covalent terms (equipartition), so `strain`

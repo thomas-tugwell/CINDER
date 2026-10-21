@@ -129,7 +129,8 @@ if tmol_available():
     from pathlib import Path
 
     from cinder.energy.base import finite_difference_gradient
-    from cinder.energy.tmol import build_tmol_design_energy, load_structure_system
+    from cinder.energy.tmol import load_structure_system
+    from cinder.energy.tmol_design import build_tmol_design_energy
 
     pdb = Path(__file__).resolve().parents[1] / "tests/fixtures/barnase_barstar_AD.pdb"
     cfg = config_from_dict(

@@ -16,11 +16,11 @@ from cinder.energy.tmol import (
     STRAIN_TERMS,
     SequenceMismatchError,
     TMolGroupEnergy,
-    build_tmol_design_energy,
     load_structure_system,
     tmol_available,
     write_pdb,
 )
+from cinder.energy.tmol_design import build_tmol_design_energy
 from cinder.types import SequenceBatch
 
 pytestmark = [
@@ -88,10 +88,10 @@ def test_interface_decomposition_matches_manual(system, energy):
         - ctx.scores("target", ctx.split(x, "target"))[rows].sum()
         - ctx.scores("binder", ctx.split(x, "binder"))[rows].sum()
     )
-    model = TMolGroupEnergy(ctx, INTERFACE_TERMS, system.design_space.native_tokens(), True)
+    model = TMolGroupEnergy(ctx, INTERFACE_TERMS, system.design_space.native_tokens(), "interface")
     assert float(model.energy(system, x, _native(system))) == pytest.approx(float(manual))
     # row order check: the repulsion-only group equals weight-adjusted fa_ljrep row
-    rep = TMolGroupEnergy(ctx, REPULSION_TERMS, system.design_space.native_tokens(), False)
+    rep = TMolGroupEnergy(ctx, REPULSION_TERMS, system.design_space.native_tokens(), "complex")
     assert float(rep.energy(system, x, _native(system))) == pytest.approx(
         float(ctx.scores("complex", x)[ctx.term_rows(["fa_ljrep"])].sum())
     )
@@ -236,3 +236,29 @@ def test_rigid_body_gradient_matches_finite_differences_on_real_complex(system, 
     a = energy.evaluate(system, system.reference_coordinates[None], seq).terms["strain"]
     b = energy.evaluate(system, moved, seq).terms["strain"]
     assert float(b) == pytest.approx(float(a), rel=1e-3)
+
+
+def test_hbond_and_elec_terms_are_separate_weighted_extras(cfg, system):
+    """hbond/elec weights add emphasis on top of ``interface``; default weights change nothing."""
+    base = build_tmol_design_energy(cfg.energy, system)
+    seq, x = _native(system), system.reference_coordinates[None]
+    ref = base.evaluate(system, x, seq)
+    assert "hbond" not in ref.terms and "elec" not in ref.terms  # weight 0 -> not added
+
+    boosted_cfg = config_from_dict(
+        {
+            **cfg.to_dict(),
+            "energy": {**cfg.energy.__dict__, "hbond_weight": 2.0, "elec_weight": 0.5},
+        }
+    )
+    boosted = build_tmol_design_energy(boosted_cfg.energy, system).evaluate(system, x, seq)
+    ctx = system.extras["tmol"]
+    from cinder.energy.tmol import group_energies
+
+    raw = group_energies(ctx, system.design_space.native_tokens())
+    hb = float(raw["hbond"].energy(system, x, seq)[0])
+    el = float(raw["elec"].energy(system, x, seq)[0])
+    assert float(boosted.terms["hbond"]) == pytest.approx(2.0 * hb)
+    assert float(boosted.terms["elec"]) == pytest.approx(0.5 * el)
+    assert float(boosted.total) == pytest.approx(float(ref.total) + 2.0 * hb + 0.5 * el, rel=1e-4)
+    assert hb < 0  # the native interface has net-favourable hydrogen bonding

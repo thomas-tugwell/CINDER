@@ -16,12 +16,11 @@ import torch
 from cinder.experiments.checkpoint import save_checkpoint
 from cinder.experiments.logging import CsvLogger
 from cinder.optimization.reinforce import reinforce_loss
-from cinder.sequence.categorical import CategoricalPolicy
+from cinder.sequence.base import TrainablePolicy
 from cinder.systems.specification import MolecularSystem
 from cinder.types import (
     AMINO_ACIDS,
-    ConformationModel,
-    EnsembleObjective,
+    RewardModel,
     SequenceBatch,
     decode_sequence,
 )
@@ -32,7 +31,6 @@ log = logging.getLogger("cinder.trainer")
 @dataclass
 class TrainerSettings:
     batch_size: int = 32
-    n_samples: int = 8
     learning_rate: float = 0.05
     iterations: int = 200
     entropy_weight: float = 0.01
@@ -52,16 +50,15 @@ class SequenceTrainer:
     def __init__(
         self,
         system: MolecularSystem,
-        policy: CategoricalPolicy,
-        conformation_model: ConformationModel,
-        objective: EnsembleObjective,
+        policy: TrainablePolicy,
+        reward: RewardModel,
         settings: TrainerSettings,
         run_dir: Path | None = None,
         generator: torch.Generator | None = None,
         on_iteration: Callable[[int, dict[str, float]], None] | None = None,
     ) -> None:
         self.system, self.policy = system, policy
-        self.conformations, self.objective = conformation_model, objective
+        self.reward = reward
         self.s = settings
         self.run_dir = run_dir
         self.generator = generator
@@ -74,8 +71,7 @@ class SequenceTrainer:
     def step(self, iteration: int) -> tuple[dict[str, float], list[str], torch.Tensor]:
         sample = self.policy.sample(self.s.batch_size, self.generator)
         full = SequenceBatch(self.system.design_space.assemble(sample.tokens))
-        confs = self.conformations.sample(self.system, full, self.s.n_samples, self.generator)
-        result = self.objective(self.system, full, confs)
+        result = self.reward(self.system, full)
         entropy = self.policy.entropy()
         loss = reinforce_loss(
             sample.log_prob,

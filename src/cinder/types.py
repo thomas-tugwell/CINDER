@@ -186,3 +186,17 @@ class EnsembleObjective(Protocol):
     def __call__(
         self, system: MolecularSystem, sequence: SequenceBatch, conformations: ConformationBatch
     ) -> ObjectiveResult: ...
+
+
+@runtime_checkable
+class RewardModel(Protocol):
+    """Maps a batch of full binder sequences to one reward each, via whatever ensemble the
+    implementation builds for each sequence.
+
+    This is the only thing a sequence optimiser needs from the structure/energy side. Sampling
+    one shared conformation model and one energy
+    (:class:`~cinder.objectives.ensemble.SampledEnsembleReward`) is one implementation; building
+    a different pose per sequence (the TMol mutant ensemble) is another.
+    """
+
+    def __call__(self, system: MolecularSystem, sequence: SequenceBatch) -> ObjectiveResult: ...

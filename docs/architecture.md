@@ -17,6 +17,14 @@ R(S) = −agg_k U_k       EnsembleObjective     objectives/ensemble.py
 REINFORCE + entropy     SequenceTrainer       optimization/{reinforce, trainer}.py
 ```
 
+```
+RewardModel (types.py)  sequences -> reward + ensemble energies, the only thing the trainer needs
+  SampledEnsembleReward   one conformation model + one energy (toy)
+  TMolMutantReward        per-sequence packed pose + jump/torsion ensemble (experiments/tmol_reward.py)
+CoordinateParametrization  q -> Cartesian: RigidBody (6), TMolTorsion (k), Composed
+SequencePolicy            CategoricalPolicy (independent), AutoregressivePolicy (coupled positions)
+```
+
 ## Boundaries
 
 * All interfaces and containers live in `src/cinder/types.py`.

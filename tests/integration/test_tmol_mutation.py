@@ -107,7 +107,7 @@ def test_build_is_cached_and_deterministic(system):
 
 def test_score_terms_are_finite_and_complete(system, builder):
     s = builder.score(system.design_space.native)
-    assert set(s) == {"interface", "repulsion", "strain", "n_atoms"}
+    assert set(s) == {"interface", "repulsion", "strain", "hbond", "elec", "internal", "n_atoms"}
     assert all(torch.isfinite(torch.tensor(v)) for v in s.values())
 
 

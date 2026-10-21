@@ -31,10 +31,11 @@ validated affinity optimisation.
 
 **Current status in one paragraph.** The machinery works on analytic toy problems, the TMol
 evaluator and its gradients are verified on real complexes, binder structure recovery is validated
-on three helical complexes, and mutated sequences can be built and scored as single packed
-structures. **Not yet done:** ensemble sampling for mutated sequences, a sequence-design loop on a
-real complex, and the central ensemble-versus-single-structure comparison. See
-[TODO.md](TODO.md).
+on three helical complexes in Cartesian, rigid-body and torsion spaces, mutated sequences are
+built and scored (single packed structure or jump-space ensemble), and `cinder design` runs a
+sequence-optimisation loop on a real complex with TMol. **Not yet done:** any comparison with
+experimental binding data, so the central ensemble-versus-single-structure hypothesis is
+untested. See [TODO.md](TODO.md).
 
 ```mermaid
 flowchart LR
@@ -60,9 +61,10 @@ at that point yet be brittle to small conformational changes, or the reverse. Av
 soft-minimising) the design energy over $p(X\mid S,T)$ rewards sequences that are good across
 the accessible conformations.
 
-*Status:* ensemble averaging is implemented and exercised on the toy problem (K poses per
-sequence, aggregated into a reward). On real proteins, every result so far uses a single pose per
-run; ensemble sampling on real complexes has not been done yet.
+*Status:* ensemble averaging is implemented for both the toy problem and TMol (K jump-space poses
+per packed mutant, aggregated into a reward), and the recovery benchmarks use single trajectories.
+The claim that ensembles rank binders better than a single structure has not been tested against
+experimental data.
 
 ## Mathematical formulation
 
@@ -102,7 +104,8 @@ binder's internal geometry is preserved exactly.
 |---|---|
 | Langevin (energy-only / score-guided), Cartesian | implemented, tested against closed forms |
 | Langevin in rigid-body (jump) space | implemented, validated on three complexes |
-| Torsion-space (phi/psi/chi) moves | planned; see [TODO.md](TODO.md) |
+| Langevin in torsion space (phi/psi, or chi) | implemented; needs the binder `internal` energy |
+| Torsion + rigid-body jumps combined | implemented |
 | Conditional normalising flow (toy coordinates) | implemented, tested against $-\log Z$ |
 | Diffusion, flow matching, BioEmu2 adapter | interfaces + experimental stubs |
 
@@ -167,14 +170,23 @@ and that results are cached and deterministic. A silent failure mode was found a
 raises `MutationError` whenever a requested residue is not what the packer returned. Only
 single-structure scores are produced; no ensemble around each mutant yet.
 
-**Tests.** 78 CPU tests run by default; 23 more (plus one skip) need TMol (`pytest -m tmol`).
+**Verified: the TMol design loop and new terms.** `cinder design` on barnase/barstar (5 designable
+positions, per-sequence packed poses, jump-space ensembles) runs end to end; `hbond`, `elec`,
+`internal` and `hbond_graph` are separately weighted and logged per term; the soft H-bond graph
+agrees with an independent hard-threshold counter (13.2 vs 15 cross-interface bonds) and its first
+shell recovers barstar's classic interface residues from geometry alone. The autoregressive
+sequence policy represents coupled optima that the independent policy cannot. The loop has not
+been shown to improve anything real: three iterations only demonstrate that it runs.
+
+**Tests.** 112 CPU tests run by default; 42 more (plus one skip) need TMol (`pytest -m tmol`).
 
 **Not verified.**
-- A sequence-design loop on a real complex. Mutated poses can be built and scored, but
-  `cinder design` does not use TMol, and no ensemble is sampled around mutants.
+- That any of the new terms (H-bond graph, second shell, `hbond`/`elec` emphasis) improves a real
+  design. They are implemented and tested for correctness, not validated against experiment.
+- Ensemble versus single-structure ranking on measured mutational data. The tooling exists
+  (`scripts/mutant_scan.py`); no experimental dataset has been used yet.
 - Anything about binding affinity. No experimental data have been compared.
 - That ensemble scoring beats single-structure scoring. This is the hypothesis, not a result.
-- Ensemble sampling on real proteins at all (the recovery runs use one pose per run).
 - Learned protein-scale models, diffusion, flow matching and BioEmu2 (stubs).
 
 ## Quick start
@@ -192,7 +204,13 @@ cinder score  --config configs/experiment/score.yaml        # barnase/barstar, n
 python scripts/structure_recovery.py --complex 2ZTA --space rigid --rot 0 2 --trans 0 1 --n 1 \
     --steps 4000 --step-size 2e-5 --lam0 5 --lam1 50 --clip 2000
 python scripts/validation_report.py                         # reproduces the tables above
+cinder design --config configs/experiment/design_tmol.yaml  # TMol design loop, minutes on CPU
+python scripts/mutant_scan.py mutants.csv --complex 2ZTA    # single-structure vs ensemble scores
 ```
+
+`--space {cartesian,rigid,torsion,torsion_rigid}` selects what the recovery sampler moves;
+torsion spaces use the binder's own (`internal`) energy by default. `device: auto` picks a GPU when
+one exists (CPU is the default).
 
 Each recovery run writes `runs/<timestamp>_recovery_<space>_<ID>/` with `results.csv`, `config.yaml`,
 `metadata.json` and `structures/` (reference, perturbed start and final PDBs, same atom order, so
@@ -203,10 +221,12 @@ they superimpose directly).
 ```
 src/cinder/  types.py  config.py  cli.py  doctor.py
   systems/        design space, molecular system, rigid-body (jump) parametrization
-  energy/         toy energies, composite, restraints, rigid_body, tmol*.py (the only TMol imports)
+  energy/         toy energies, composite, restraints, parametrized; tmol*.py (the only TMol imports)
   conformations/  Langevin, normalising flow, guidance, diffusion/flow-matching/BioEmu2 stubs
-  sequence/ objectives/ optimization/ experiments/ utils/
-  validation/     perturbations, recovery protocol, PDB fetch, chain-break and helicity checks
+  sequence/       categorical and autoregressive policies, design-space constraints
+  objectives/     ensemble aggregators, H-bond graph (first/second shell), regularisers
+  optimization/ experiments/ utils/
+  validation/     perturbations, recovery protocol, mutant scans, PDB fetch, chain-break checks
 scripts/  configs/  docs/  examples/  tests/  assets/        (runs/ and data/ are git-ignored)
 ```
 
@@ -215,17 +235,17 @@ scripts/  configs/  docs/  examples/  tests/  assets/        (runs/ and data/ ar
 - [x] Foundation, config, CLI, CI, docs
 - [x] Analytic toys, Langevin, energy guidance
 - [x] TMol evaluator: scoring, gradients (finite-difference checked), interface decomposition, batching
-- [x] Local restrained ensembles around a crystal pose
-- [x] Categorical policy + REINFORCE converging to a brute-force optimum (toy)
-- [x] Toy normalising flow
-- [x] Rigid-body (jump) DOFs: sampling, gradients, recovery benchmark on three helical complexes
-- [x] Mutation + repacking: one packed pose per sequence, single-structure scores
+- [x] Rigid-body (jump) DOFs and torsion (phi/psi/chi) DOFs: sampling, gradients, recovery benchmarks
+- [x] Mutation + repacking, per-sequence ensembles, `RewardModel` interface, TMol design loop
+- [x] Separately weighted `hbond`, `elec` (stands in for salt bridges), `internal` and
+      `hbond_graph` (first/second shell) terms; design positions proposed from the shells
+- [x] Categorical and autoregressive (coupled) sequence policies
+- [x] Mutant-scan tooling for single-structure vs ensemble comparison
 - [x] PDB output for benchmark runs
-- [ ] **Ensemble sampling in jump space around each mutant sequence** (the central claim)
-- [ ] **TMol-driven sequence design on a real complex** (wire the builder and ensemble into `run_design`)
-- [ ] Separately weighted `hbond` and `fa_elec` rewards (`fa_elec` stands in for a salt-bridge term)
-- [ ] Torsion-space (phi/psi/chi) perturbations and gradients
-- [ ] Benchmarks: single structure vs ensemble; guided vs unguided; vs random / MPNN proposals
+- [ ] **Compare ensemble vs single-structure scoring on measured mutational data** (the central claim)
+- [ ] Validate the H-bond graph and second-shell terms against experiment or an independent tool
+- [ ] Combined moves in the design loop (torsion DOFs inside `rigid_langevin`), pair-mutation proposals
+- [ ] Benchmarks vs random search / MPNN proposals; guided vs unguided
 - [ ] Protein-scale learned conformational models; diffusion / flow matching; BioEmu2 prior
 
 ## Related work
@@ -257,7 +277,8 @@ BioEmu-based design. A full literature review is required before any publication
 
 [Theory](docs/theory.md) · [Architecture](docs/architecture.md) · [TMol](docs/tmol.md) ·
 [Models](docs/models.md) · [Sequence optimisation](docs/sequence_optimization.md) ·
-[Validation](docs/validation.md) · [Development](docs/development.md)
+[H-bond graph](docs/hbond_graph.md) · [Validation](docs/validation.md) ·
+[Development](docs/development.md)
 
 ## Citation
 

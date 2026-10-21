@@ -15,7 +15,12 @@ from torch import Tensor
 
 from cinder.energy.composite import CompositeEnergy
 from cinder.systems.specification import MolecularSystem
-from cinder.types import ConformationBatch, ObjectiveResult, SequenceBatch
+from cinder.types import (
+    ConformationBatch,
+    ConformationModel,
+    ObjectiveResult,
+    SequenceBatch,
+)
 
 Aggregator = Callable[[Tensor], Tensor]
 
@@ -82,3 +87,26 @@ class EnergyEnsembleObjective:
         energies = out.total.reshape(b, k)
         terms = {name: v.reshape(b, k) for name, v in out.terms.items()}
         return ObjectiveResult(reward=-self.aggregator(energies), energies=energies, terms=terms)
+
+
+class SampledEnsembleReward:
+    """:class:`~cinder.types.RewardModel`: sample ``n_samples`` conformations per sequence from one
+    conformation model, then reduce their energies with an :class:`EnergyEnsembleObjective`."""
+
+    def __init__(
+        self,
+        conformations: ConformationModel,
+        objective: EnergyEnsembleObjective,
+        n_samples: int,
+        generator: torch.Generator | None = None,
+    ) -> None:
+        if n_samples < 1:
+            raise ValueError("n_samples must be >= 1")
+        self.conformations = conformations
+        self.objective = objective
+        self.n_samples = n_samples
+        self.generator = generator
+
+    def __call__(self, system: MolecularSystem, sequence: SequenceBatch) -> ObjectiveResult:
+        confs = self.conformations.sample(system, sequence, self.n_samples, self.generator)
+        return self.objective(system, sequence, confs)
