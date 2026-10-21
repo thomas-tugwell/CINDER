@@ -6,8 +6,8 @@ import torch
 from cinder.conformations import LangevinSampler
 from cinder.energy.base import finite_difference_gradient
 from cinder.energy.composite import CompositeEnergy, EnergyTerm
+from cinder.energy.parametrized import ParametrizedEnergy
 from cinder.energy.restraints import HarmonicRestraint
-from cinder.energy.rigid_body import RigidBodyEnergy
 from cinder.systems.rigid_body import (
     N_RIGID_DOF,
     RigidBodyParametrization,
@@ -15,11 +15,19 @@ from cinder.systems.rigid_body import (
 )
 from cinder.types import SequenceBatch
 from cinder.validation import Perturbation, rigid_body_perturb, rmsd, run_rigid_recovery
-from cinder.validation.perturb import rotation_matrix
 
 from ..conftest import make_toy_system
 
 DT = torch.float64
+
+
+def rotation_matrix(axis, angle_rad):
+    """Independent Rodrigues reference (test oracle for ``rotation_from_vector``)."""
+    a = axis / axis.norm()
+    k = torch.tensor([[0, -a[2], a[1]], [a[2], 0, -a[0]], [-a[1], a[0], 0]], dtype=a.dtype)
+    return (
+        torch.eye(3, dtype=a.dtype) + math.sin(angle_rad) * k + (1 - math.cos(angle_rad)) * (k @ k)
+    )
 
 
 def _system(n=12, seed=0):
@@ -71,17 +79,23 @@ def test_to_cartesian_identity_translation_and_rigidity():
     assert torch.allclose(torch.cdist(moved[atoms], moved[atoms]), d0, atol=1e-10)  # rigid
 
 
-def test_matches_cartesian_rigid_body_perturb_with_same_draws():
-    """The jump transform equals the Cartesian ``rigid_body_perturb`` for the same random jump."""
+def test_cartesian_rigid_perturbation_matches_an_independent_rodrigues_oracle():
+    """``rigid_body_perturb`` (a wrapper over the jump parametrization) must equal an explicit
+    rotation about the centroid plus a shift, using the same random draws."""
     system = _system()
     atoms = torch.arange(8)
-    p = RigidBodyParametrization(system.reference_coordinates, atoms)
-    q = p.dofs(20.0, 1.5, torch.Generator().manual_seed(7), dtype=torch.float64)
-    via_q = p.to_cartesian(q[None])[0]
-    via_cart = rigid_body_perturb(
-        system.reference_coordinates, atoms, 20.0, 1.5, torch.Generator().manual_seed(7)
-    )
-    assert torch.allclose(via_q, via_cart, atol=1e-9)
+    ref = system.reference_coordinates
+    got = rigid_body_perturb(ref, atoms, 20.0, 1.5, torch.Generator().manual_seed(7))
+
+    g = torch.Generator().manual_seed(7)  # replay the draw order: axis, then direction
+    axis = torch.randn(3, generator=g, dtype=ref.dtype)
+    direction = torch.randn(3, generator=g, dtype=ref.dtype)
+    rot = rotation_matrix(axis, math.radians(20.0))
+    centre = ref[atoms].mean(0)
+    expected = ref.clone()
+    expected[atoms] = (ref[atoms] - centre) @ rot.T + centre + direction / direction.norm() * 1.5
+    assert torch.allclose(got, expected, atol=1e-9)
+    assert torch.equal(got[8:], ref[8:])  # atoms outside the group are untouched
 
 
 def test_rotation_scale_default_is_radius_of_gyration_and_floor():
@@ -112,7 +126,7 @@ def test_energy_gradient_wrt_dofs_matches_finite_differences():
     ref_sys = _system()
     ref_sys.reference_coordinates = target
     base = HarmonicRestraint(k=2.0)
-    wrapped = RigidBodyEnergy(
+    wrapped = ParametrizedEnergy(
         _Fixed(base, ref_sys), p, system
     )  # energy measured against ``target``
     dof_system = p.dof_system(system)
@@ -141,7 +155,7 @@ def test_langevin_in_jump_space_recovers_reference_and_stays_rigid():
     p = RigidBodyParametrization(system.reference_coordinates, atoms)
     energy = CompositeEnergy([EnergyTerm("well", HarmonicRestraint(k=1.0))])
     sampler = LangevinSampler.from_energy(
-        RigidBodyEnergy(energy, p, system), strength=40.0, step_size=0.002, n_steps=800
+        ParametrizedEnergy(energy, p, system), strength=40.0, step_size=0.002, n_steps=800
     )
     res = run_rigid_recovery(
         system, energy, p, sampler, _seq(), Perturbation("rigid", 15.0, 2.0),
@@ -163,7 +177,7 @@ def test_run_rigid_recovery_rejects_non_rigid_perturbation():
     system = _system()
     p = RigidBodyParametrization(system.reference_coordinates, torch.arange(4))
     energy = CompositeEnergy([EnergyTerm("w", HarmonicRestraint())])
-    sampler = LangevinSampler.from_energy(RigidBodyEnergy(energy, p, system))
+    sampler = LangevinSampler.from_energy(ParametrizedEnergy(energy, p, system))
     with pytest.raises(ValueError, match="rigid"):
         run_rigid_recovery(system, energy, p, sampler, _seq(), Perturbation("cartesian", sigma=1.0))
 
@@ -227,9 +241,6 @@ def test_composed_parametrization_applies_first_then_rigid_and_has_correct_gradi
     )
     assert torch.allclose(g, fd, atol=1e-5)
     assert comp.dof_system(system).coord_shape == (comp.n_dofs,)
-    from cinder.energy.rigid_body import RigidBodyEnergy
-
-    assert RigidBodyEnergy is ParametrizedEnergy  # descriptive alias kept
 
 
 def test_rigid_apply_to_arbitrary_coordinates_is_consistent_with_to_cartesian():

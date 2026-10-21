@@ -180,15 +180,6 @@ class SequencePolicy(Protocol):
 
 
 @runtime_checkable
-class EnsembleObjective(Protocol):
-    """Turns sequences + K conformations into one scalar reward per sequence."""
-
-    def __call__(
-        self, system: MolecularSystem, sequence: SequenceBatch, conformations: ConformationBatch
-    ) -> ObjectiveResult: ...
-
-
-@runtime_checkable
 class RewardModel(Protocol):
     """Maps a batch of full binder sequences to one reward each, via whatever ensemble the
     implementation builds for each sequence.

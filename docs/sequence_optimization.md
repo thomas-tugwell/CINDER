@@ -38,3 +38,25 @@ shared conformation model; `rigid_langevin` (TMol structures) builds a packed po
 a jump-space ensemble around it, cached per sequence (`conformation.options`: `repack`,
 `repack_cutoff`). `n_steps: 0, init_std: 0, n_samples: 1` degenerates to the single packed
 structure, the baseline for the ensemble comparison. Example: `configs/experiment/design_tmol.yaml`.
+
+## Exact-gradient optimisation on pairwise tables (no REINFORCE)
+
+Choosing an amino acid is discrete, but if the energy is (approximately) a sum of one-body and
+two-body terms, `U(S) ~ e0 + sum_i e1[i, s_i] + sum_{(i,j)} e2[ij][s_i, s_j]`, then the expected
+energy under the factorised policy is **exact and smooth in the logits**:
+`E_q[U] = e0 + sum_i p_i . e1[i] + sum_pairs p_i^T e2[ij] p_j`
+(`objectives/pairwise_table.py`). `optimization/expected_energy.py` minimises
+`E_q[U] - alpha * H[q]` by gradient descent, annealing `alpha` toward 0, so there is no sampling
+variance. Properties that are tested: the expectation equals brute-force enumeration; its gradient
+matches finite differences; for a one-body table the optimum is exactly the Boltzmann distribution
+`p ∝ exp(-e1/alpha)`; on the toy sequence problem (exactly pairwise) the trainer lands on the
+brute-force optimum.
+
+Tables are built from any scorer by inclusion-exclusion around the native sequence
+(`tables_from_scorer`): `e1[i][a] = U(a at i) - U(native)`, and for residues in contact
+(`contact_pairs`) `e2[ij][a,b] = U(a at i, b at j) - U(native) - e1[i][a] - e1[j][b]`. One- and
+two-body substitutions are reproduced exactly; three-body effects are not, and
+`approximation_error` measures that on held-out multi-mutants. With the single packed TMol
+structure as the scorer (`scripts/table_design.py`) the table is a fast proposal generator on a
+**fixed native backbone**: it ignores ensembles and any backbone adaptation, so verify winners with
+the real scorer.

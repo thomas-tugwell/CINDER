@@ -137,3 +137,35 @@ def test_identity_check_fails_loudly(system, builder):
     wrong = mutate(native, POS, "W" if native[POS] != "W" else "A")
     with pytest.raises(MutationError, match="requested"):
         builder._check_identities(packed, wrong)
+
+
+def test_build_from_a_perturbed_backbone_packs_on_that_backbone(system, builder, tmp_path):
+    """``build_from`` packs the mutant on supplied (perturbed) coordinates, uncached; the backbone
+    CA positions stay at the perturbed values rather than the crystal ones."""
+    native = system.design_space.native
+    seq = mutate(native, POS, "A" if native[POS] != "A" else "L")
+    ref = system.reference_coordinates
+    noisy = ref.clone()
+    binder = system.extras["binder_atoms"]
+    noisy[binder] += 0.4  # a rigid 0.4 Å shift of the whole binder (keeps geometry)
+    mutant = builder.build_from(seq, noisy)
+    assert mutant is not builder.build(seq) and name3_at(mutant, system, POS) in {"ALA", "LEU"}
+    lo, hi = system.extras["binder_residue_range"]
+    new_ca = _ca_atom_indices(mutant.complex, lo, hi)
+    old_ca = system.extras["binder_ca_atoms"]
+    assert torch.allclose(mutant.coordinates[new_ca], noisy[old_ca], atol=1e-3)
+    assert not torch.allclose(mutant.coordinates[new_ca], ref[old_ca], atol=1e-3)
+    with pytest.raises(ValueError, match="coordinates must be"):
+        builder.build_from(seq, noisy[:10])
+    out = builder.write_pdb(mutant, tmp_path / "m.pdb")
+    assert out.read_text().count("ATOM") == mutant.coordinates.shape[0]
+    cached = builder.write_pdb(seq, tmp_path / "c.pdb")  # string form uses the native backbone
+    assert cached.exists()
+
+
+def test_mutant_system_has_binder_only_move_mask(system, builder):
+    native = system.design_space.native
+    msys = builder.system_for(mutate(native, POS, "A" if native[POS] != "A" else "L"))
+    mask = msys.move_mask[:, 0]
+    assert int(mask.sum()) == len(msys.extras["binder_atoms"])
+    assert float(mask[msys.extras["target_atoms"]].sum()) == 0.0

@@ -7,7 +7,7 @@ import torch
 
 from cinder.config import config_from_dict
 from cinder.energy.base import finite_difference_gradient
-from cinder.energy.rigid_body import RigidBodyEnergy
+from cinder.energy.parametrized import ParametrizedEnergy
 from cinder.energy.tmol import load_structure_system, tmol_available
 from cinder.energy.tmol_design import (
     build_hbond_graph_energy,
@@ -121,7 +121,7 @@ def test_graph_gradient_chains_through_rigid_body_dofs(system, roles):
     from cinder.objectives.hbond_graph import HBondGraphEnergy
 
     param = RigidBodyParametrization(system.reference_coordinates, system.extras["binder_atoms"])
-    wrapped = RigidBodyEnergy(HBondGraphEnergy(roles), param, system)
+    wrapped = ParametrizedEnergy(HBondGraphEnergy(roles), param, system)
     dof_sys = param.dof_system(system)
     q = torch.tensor([[0.1, -0.05, 0.08, 0.1, -0.1, 0.05]])
     g = wrapped.gradient(dof_sys, q, _seq(system))

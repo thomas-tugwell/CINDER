@@ -1,5 +1,0 @@
-# flow_matching: not yet selectable through the runner (see docs/models.md).
-conformation:
-  backend: flow_matching
-  n_samples: 8
-  guidance_strength: 1.0

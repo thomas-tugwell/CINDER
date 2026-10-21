@@ -1,5 +1,0 @@
-# diffusion: not yet selectable through the runner (see docs/models.md).
-conformation:
-  backend: diffusion
-  n_samples: 8
-  guidance_strength: 1.0

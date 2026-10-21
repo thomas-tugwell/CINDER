@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 from torch import Tensor
 
-from cinder.energy.base import autograd_gradient
 from cinder.systems.specification import MolecularSystem
 from cinder.types import EnergyModel, EnergyOutput, SequenceBatch
 
@@ -51,4 +50,4 @@ class CompositeEnergy:
         return sum(grads)  # type: ignore[return-value]
 
 
-__all__ = ["CompositeEnergy", "EnergyTerm", "autograd_gradient"]
+__all__ = ["CompositeEnergy", "EnergyTerm"]

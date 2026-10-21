@@ -214,11 +214,11 @@ def test_ca_atom_indices_point_at_ca_atoms(system, tmp_path):
 
 def test_rigid_body_gradient_matches_finite_differences_on_real_complex(system, energy):
     """dU/dq (6 binder jump DOFs, chained through TMol autograd) vs central differences."""
-    from cinder.energy.rigid_body import RigidBodyEnergy
+    from cinder.energy.parametrized import ParametrizedEnergy
     from cinder.systems.rigid_body import RigidBodyParametrization
 
     param = RigidBodyParametrization(system.reference_coordinates, system.extras["binder_atoms"])
-    wrapped = RigidBodyEnergy(energy, param, system)
+    wrapped = ParametrizedEnergy(energy, param, system)
     dof_system = param.dof_system(system)
     seq = _native(system)
     q = torch.zeros(1, 6)

@@ -8,20 +8,16 @@ import argparse
 import csv
 import re
 
-import torch
-
-from cinder.config import EnergyConfig, config_from_dict
-from cinder.energy.tmol import load_structure_system
-from cinder.energy.tmol_mutation import TMolSequenceBuilder
 from cinder.experiments.logging import (
     CsvLogger,
     collect_metadata,
     create_run_dir,
     write_run_header,
 )
-from cinder.experiments.tmol_reward import MutantEnsembleSettings, TMolMutantReward
+from cinder.experiments.tmol_reward import MutantEnsembleSettings
+from cinder.experiments.tmol_study import load_study
 from cinder.validation import correlate, scan_mutants
-from cinder.validation.datasets import chain_breaks, load_manifest, prepare_complex
+from cinder.validation.datasets import resolve_complex
 
 
 def parse_args() -> argparse.Namespace:
@@ -58,45 +54,21 @@ def read_mutants(path: str) -> tuple[dict[str, str], dict[str, float]]:
 def main() -> None:
     args = parse_args()
     mutants, measured = read_mutants(args.mutants)
-    if args.complex:
-        spec = {s.pdb_id: s for s in load_manifest(args.manifest)}[args.complex.upper()]
-        pdb, target, binder = (
-            str(prepare_complex(spec, args.data_dir)),
-            spec.target_chains,
-            spec.binder_chains,
+    try:
+        pdb, target, binder = resolve_complex(
+            args.complex, args.manifest, args.data_dir, args.pdb, [args.target], [args.binder]
         )
-    else:
-        pdb, target, binder = args.pdb, [args.target], [args.binder]
-    if chain_breaks(pdb):
-        raise SystemExit(f"chain breaks in {pdb}: {chain_breaks(pdb)}")
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     positions = sorted(
         {int(i) for m in mutants.values() for i in re.findall(r"[A-Z](\d+)[A-Z]", m)}
     )
-    cfg = config_from_dict(
-        {
-            "seed": args.seed,
-            "system": {
-                "kind": "structure",
-                "structure_path": pdb,
-                "target_chains": target,
-                "binder_chains": binder,
-                "design_positions": positions,
-            },
-            "energy": {"backend": "tmol", "restraint_weight": 0.0, "strain_weight": 0.1},
-        }
-    )
-    system = load_structure_system(cfg.system)
-    builder = TMolSequenceBuilder(system, repack="neighbors", cutoff=6.0, seed=args.seed)
-    energy_cfg: EnergyConfig = cfg.energy
-
-    def reward(settings: MutantEnsembleSettings) -> TMolMutantReward:
-        gen = torch.Generator().manual_seed(args.seed)
-        return TMolMutantReward(builder, energy_cfg, settings, generator=gen)
-
+    study = load_study(pdb, target, binder, design_positions=positions, seed=args.seed)
+    system = study.system
     models = {
         # K=1, no sampling: the packed pose itself (the single-structure baseline)
-        "single": reward(MutantEnsembleSettings(n_samples=1, n_steps=0, init_std=0.0)),
-        "ensemble": reward(
+        "single": study.single_structure_reward(),
+        "ensemble": study.reward(
             MutantEnsembleSettings(
                 n_samples=args.samples,
                 guidance_strength=args.lam,

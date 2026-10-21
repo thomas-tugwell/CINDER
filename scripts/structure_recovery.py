@@ -34,7 +34,7 @@ from cinder.validation import (
     run_dof_recovery,
     run_recovery,
 )
-from cinder.validation.datasets import chain_breaks, load_manifest, prepare_complex
+from cinder.validation.datasets import resolve_complex
 
 
 def parse_args() -> argparse.Namespace:
@@ -68,23 +68,6 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--output-dir", default="runs", help="a new run directory is created here")
     return ap.parse_args()
-
-
-def resolve_complex(args: argparse.Namespace) -> tuple[str, list[str], list[str]]:
-    """Return (pdb path, target chains, binder chains) from --complex or --pdb."""
-    if args.complex:
-        specs = {s.pdb_id: s for s in load_manifest(args.manifest)}
-        if args.complex.upper() not in specs:
-            raise SystemExit(f"{args.complex} not in {args.manifest}: {sorted(specs)}")
-        spec = specs[args.complex.upper()]
-        path = str(prepare_complex(spec, args.data_dir))
-        target, binder = spec.target_chains, spec.binder_chains
-    else:
-        path, target, binder = args.pdb, [args.target], [args.binder]
-    breaks = chain_breaks(path)
-    if breaks and not args.allow_breaks:
-        raise SystemExit(f"chain breaks in {path}: {breaks} (use --allow-breaks to override)")
-    return path, target, binder
 
 
 @dataclass
@@ -143,7 +126,13 @@ def make_space(args: argparse.Namespace, system: MolecularSystem, energy: Compos
 
 def main() -> None:
     args = parse_args()
-    pdb_path, target_chains, binder_chains = resolve_complex(args)
+    try:
+        pdb_path, target_chains, binder_chains = resolve_complex(
+            args.complex, args.manifest, args.data_dir, args.pdb, [args.target], [args.binder],
+            args.allow_breaks,
+        )  # fmt: skip
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     flexible = args.space.startswith("torsion")
     internal = (
         args.internal_weight if args.internal_weight is not None else (1.0 if flexible else 0.0)

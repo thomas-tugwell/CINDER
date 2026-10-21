@@ -43,6 +43,11 @@ class CategoricalPolicy(nn.Module):
     def probs(self) -> Tensor:
         return self.log_probs().exp().detach()
 
+    def marginals(self) -> Tensor:
+        """Per-position probabilities ``[P, 20]`` *with* gradients (masked entries are 0); the
+        ``q`` in exact expected-energy objectives."""
+        return self.log_probs().exp()
+
     def sample(self, batch_size: int, generator: torch.Generator | None = None) -> SequenceSample:
         with torch.no_grad():
             p = self.log_probs().exp()

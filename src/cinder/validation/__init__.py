@@ -7,6 +7,15 @@ from cinder.validation.mutant_scan import (
     scan_mutants,
     spearman,
 )
+from cinder.validation.mutation_sampling import (
+    EffectSummary,
+    MutationSampler,
+    PositionProfile,
+    SampledMutant,
+    position_scan,
+    summarize_effects,
+)
+from cinder.validation.noise import NoiseSpec
 from cinder.validation.perturb import cartesian_perturb, kabsch_rmsd, rigid_body_perturb, rmsd
 from cinder.validation.recovery import (
     Perturbation,
@@ -18,6 +27,13 @@ from cinder.validation.recovery import (
 )
 
 __all__ = [
+    "EffectSummary",
+    "MutationSampler",
+    "PositionProfile",
+    "SampledMutant",
+    "position_scan",
+    "summarize_effects",
+    "NoiseSpec",
     "Perturbation",
     "RecoveryResult",
     "ScanRow",

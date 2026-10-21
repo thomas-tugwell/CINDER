@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import urllib.request
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -151,3 +152,36 @@ def chain_breaks(
                     out.setdefault(chain, []).append((prev_resi, resi, round(dist, 1)))
             last[chain] = (resi, xyz)
     return out
+
+
+def resolve_complex(
+    complex_id: str | None,
+    manifest: str | Path,
+    data_dir: str | Path,
+    pdb: str | Path,
+    target: Sequence[str],
+    binder: Sequence[str],
+    allow_breaks: bool = False,
+) -> tuple[str, list[str], list[str]]:
+    """``(pdb path, target chains, binder chains)`` from a manifest id (downloaded and prepared on
+    first use) or, if ``complex_id`` is ``None``, from an explicit ``pdb`` path and chains.
+
+    Raises :class:`ValueError` for an unknown id or, unless ``allow_breaks``, a structure with
+    chain breaks (TMol would bridge the gap with a stretched bond).
+    """
+    if complex_id:
+        specs = {s.pdb_id: s for s in load_manifest(manifest)}
+        if complex_id.upper() not in specs:
+            raise ValueError(f"{complex_id} not in {manifest}: {sorted(specs)}")
+        spec = specs[complex_id.upper()]
+        path, targets, binders = (
+            str(prepare_complex(spec, data_dir)),
+            spec.target_chains,
+            spec.binder_chains,
+        )
+    else:
+        path, targets, binders = str(pdb), list(target), list(binder)
+    breaks = chain_breaks(path)
+    if breaks and not allow_breaks:
+        raise ValueError(f"chain breaks in {path}: {breaks} (pass allow_breaks to override)")
+    return path, list(targets), list(binders)

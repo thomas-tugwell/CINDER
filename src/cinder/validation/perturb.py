@@ -2,25 +2,10 @@
 
 from __future__ import annotations
 
-import math
-
 import torch
 from torch import Tensor
 
-
-def rotation_matrix(axis: Tensor, angle_rad: float) -> Tensor:
-    """Rodrigues rotation about ``axis`` (need not be normalised)."""
-    a = axis / axis.norm()
-    zero = torch.zeros((), dtype=a.dtype)
-    k = torch.stack(
-        [
-            torch.stack([zero, -a[2], a[1]]),
-            torch.stack([a[2], zero, -a[0]]),
-            torch.stack([-a[1], a[0], zero]),
-        ]
-    )
-    eye = torch.eye(3, dtype=a.dtype)
-    return eye + math.sin(angle_rad) * k + (1 - math.cos(angle_rad)) * (k @ k)
+from cinder.systems.rigid_body import RigidBodyParametrization
 
 
 def rigid_body_perturb(
@@ -31,15 +16,14 @@ def rigid_body_perturb(
     generator: torch.Generator | None = None,
 ) -> Tensor:
     """Rotate ``atoms`` by ``rotation_deg`` about their centroid (random axis) and shift them by
-    ``translation`` along a random direction. Internal geometry is preserved exactly."""
-    axis = torch.randn(3, generator=generator, dtype=coords.dtype)
-    direction = torch.randn(3, generator=generator, dtype=coords.dtype)
-    shift = direction / direction.norm() * translation
-    centre = coords[atoms].mean(0)
-    rot = rotation_matrix(axis, math.radians(rotation_deg)).to(coords)
-    out = coords.clone()
-    out[atoms] = (coords[atoms] - centre) @ rot.T + centre + shift.to(coords)
-    return out
+    ``translation`` along a random direction. Internal geometry is preserved exactly.
+
+    A thin wrapper over :class:`~cinder.systems.rigid_body.RigidBodyParametrization`, so the
+    Cartesian perturbation and the jump-space sampler share one rotation implementation.
+    """
+    param = RigidBodyParametrization(coords, atoms)
+    q = param.dofs(rotation_deg, translation, generator, dtype=coords.dtype)
+    return param.to_cartesian(q[None])[0]
 
 
 def cartesian_perturb(

@@ -33,11 +33,31 @@ Nothing has been compared with experiment. The tooling exists (`scripts/mutant_s
   parameters (currently heuristics calibrated on barnase/barstar only).
 * `hbond`/`elec` emphasis: ablations in the recovery and design benchmarks.
 
+## 2b. Noise, mutate, refine: close the gap on large binders
+
+On barstar (87 residues) the refined noisy mutants end a median +121 energy units above the same
+sequence packed on the native backbone (+25 without noise); on 2ZTA (31 residues) the gap was about
+5. About one third is docking (final CA 1.2 to 2.5 Å from native), two thirds the binder's own fold.
+Next: a budget/schedule diagnostic (longer stage A and quench, colder anneal), lower and
+length-scaled noise levels, a better reference (the baseline is only Cartesian-polished, so it is
+too weak where a mutation needs the binder to adapt), and more mutants, complexes and seeds.
+
+## 2c. Pairwise-table design (exact gradients)
+
+Implemented (`scripts/table_design.py`). The barnase/barstar run (9 interface positions, contact-pruned
+pairs) had not finished when this was written, so no real-protein result is recorded yet; the only
+real-energy check so far is a 3-position 2ZTA smoke test (held-out Pearson 0.57, one contact pair).
+Open: three-body effects (the table is exact only for one- and two-body substitutions), tables on
+an ensemble or refined backbone instead of the fixed native one, scaling the pair scan (cost grows
+with contact pairs times alphabet squared), and using the table inside the `cinder design` loop.
+
 ## 3. Design loop
 
 * Torsion DOFs inside `rigid_langevin` (currently jump-space ensembles only; torsion ensembles are
   validated separately). Needs the `internal` weight > 0.
 * Pair/triple mutation proposals; richer policies (the autoregressive policy is a first step).
+* Mutations in the target or in both partners (the design space, sampler and builder are tied to
+  the binder chain today); most measured mutational datasets include both.
 * Cost: each sequence needs a packed pose plus a short ensemble; GPU is untested (TMol runs on
   CUDA; `device: auto` is wired but has never run on a GPU here).
 * Variance reduction beyond the batch baseline.

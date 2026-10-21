@@ -25,7 +25,7 @@ from torch import Tensor
 
 from cinder.config import EnergyConfig
 from cinder.conformations.langevin import LangevinSampler
-from cinder.energy.rigid_body import RigidBodyEnergy
+from cinder.energy.parametrized import ParametrizedEnergy
 from cinder.energy.tmol_design import build_design_energy_for_context
 from cinder.energy.tmol_mutation import TMolSequenceBuilder
 from cinder.objectives.ensemble import Aggregator, mean_aggregate
@@ -83,7 +83,7 @@ class TMolMutantReward:
         energy = build_design_energy_for_context(self.energy_config, msys, context, tokens)
         param = RigidBodyParametrization(msys.reference_coordinates, binder_atoms)
         sampler = LangevinSampler.from_energy(
-            RigidBodyEnergy(energy, param, msys),
+            ParametrizedEnergy(energy, param, msys),
             strength=st.guidance_strength,
             step_size=st.step_size,
             n_steps=st.n_steps,

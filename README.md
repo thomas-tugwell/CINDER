@@ -178,7 +178,18 @@ shell recovers barstar's classic interface residues from geometry alone. The aut
 sequence policy represents coupled optima that the independent policy cannot. The loop has not
 been shown to improve anything real: three iterations only demonstrate that it runs.
 
-**Tests.** 112 CPU tests run by default; 42 more (plus one skip) need TMol (`pytest -m tmol`).
+**Verified: mutations and the noise, mutate, refine protocol (barnase/barstar).** Low-rate random
+mutants are penalised far more at the interface than elsewhere (median energy change +21 for mutants
+with an interface mutation vs +0.5 for surface-only ones), and across the 9 first-shell positions the
+native residue is the lowest-energy choice at 7 and in the top 3 at 8 (mean rank 2.4 of 20; random
+10.5). The noise, mutate, refine pipeline (torsion, rigid-body and Cartesian noise on the binder,
+mutant packed on the noisy backbone, then gradient refinement in torsion/rigid-body and Cartesian
+space) removes the clashes and strain it starts with (about +3000 down to about 0) but, for the
+87-residue binder, ends a median of +121 energy units above the same sequence on the native backbone
+(+25 without noise); on the 31-residue 2ZTA it came within about 5. All use TMol as both guide and
+judge; none compares with experiment. Details and caveats: [docs/validation.md](docs/validation.md).
+
+**Tests.** 132 CPU tests run by default; more (plus one skip) need TMol (`pytest -m tmol`).
 
 **Not verified.**
 - That any of the new terms (H-bond graph, second shell, `hbond`/`elec` emphasis) improves a real
@@ -206,6 +217,10 @@ python scripts/structure_recovery.py --complex 2ZTA --space rigid --rot 0 2 --tr
 python scripts/validation_report.py                         # reproduces the tables above
 cinder design --config configs/experiment/design_tmol.yaml  # TMol design loop, minutes on CPU
 python scripts/mutant_scan.py mutants.csv --complex 2ZTA    # single-structure vs ensemble scores
+python scripts/random_mutants.py                            # low-rate, interface-biased random mutants
+python scripts/position_scan.py                             # all 19 substitutions at interface positions
+python scripts/mutate_refine.py --n 3                       # noise -> mutate -> gradient refinement
+python scripts/table_design.py                              # pairwise tables + exact-gradient sequence design
 ```
 
 `--space {cartesian,rigid,torsion,torsion_rigid}` selects what the recovery sampler moves;
@@ -226,7 +241,7 @@ src/cinder/  types.py  config.py  cli.py  doctor.py
   sequence/       categorical and autoregressive policies, design-space constraints
   objectives/     ensemble aggregators, H-bond graph (first/second shell), regularisers
   optimization/ experiments/ utils/
-  validation/     perturbations, recovery protocol, mutant scans, PDB fetch, chain-break checks
+  validation/     perturbations, recovery protocol, mutation sampling and scans, PDB fetch, checks
 scripts/  configs/  docs/  examples/  tests/  assets/        (runs/ and data/ are git-ignored)
 ```
 
@@ -240,11 +255,17 @@ scripts/  configs/  docs/  examples/  tests/  assets/        (runs/ and data/ ar
 - [x] Separately weighted `hbond`, `elec` (stands in for salt bridges), `internal` and
       `hbond_graph` (first/second shell) terms; design positions proposed from the shells
 - [x] Categorical and autoregressive (coupled) sequence policies
+- [x] Exact-gradient sequence optimisation on pairwise energy tables (no REINFORCE variance); tables
+      built from TMol energies with contact-pruned two-body terms
 - [x] Mutant-scan tooling for single-structure vs ensemble comparison
+- [x] Low-rate, interface-biased random mutations; position scans with native rank; noise, mutate,
+      refine protocol (torsion + rigid-body + Cartesian noise) with a fair relaxed-baseline reference
 - [x] PDB output for benchmark runs
 - [ ] **Compare ensemble vs single-structure scoring on measured mutational data** (the central claim)
 - [ ] Validate the H-bond graph and second-shell terms against experiment or an independent tool
+- [ ] Close the gap in the noise, mutate, refine protocol for large binders (budget, schedule, noise level)
 - [ ] Combined moves in the design loop (torsion DOFs inside `rigid_langevin`), pair-mutation proposals
+- [ ] Mutations in the target (or both partners); only the binder sequence can change today
 - [ ] Benchmarks vs random search / MPNN proposals; guided vs unguided
 - [ ] Protein-scale learned conformational models; diffusion / flow matching; BioEmu2 prior
 

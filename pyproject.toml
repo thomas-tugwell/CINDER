@@ -14,7 +14,7 @@ dependencies = ["torch>=2.2", "numpy>=1.25", "pyyaml>=6.0"]
 [project.optional-dependencies]
 tmol = ["tmol>=0.1.64"]
 plot = ["matplotlib>=3.8"]
-dev = ["pytest>=8", "pytest-cov", "ruff", "mypy", "types-PyYAML", "matplotlib>=3.8", "pre-commit"]
+dev = ["pytest>=8", "pytest-cov", "ruff", "mypy", "types-PyYAML", "matplotlib>=3.8", "pre-commit", "vulture"]
 
 [project.scripts]
 cinder = "cinder.cli:main"
@@ -45,3 +45,8 @@ files = ["src/cinder"]
 ignore_missing_imports = true
 warn_unused_ignores = true
 check_untyped_defs = true
+
+[tool.vulture]
+paths = ["src", "scripts", "tests", "examples"]
+min_confidence = 60
+ignore_names = ["forward"]  # nn.Module.forward is called implicitly

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any
 
 import torch
@@ -138,18 +139,34 @@ class TMolSequenceBuilder:
         return tokens
 
     def build(self, sequence: str) -> MutantPoses:
-        """Poses for ``sequence`` (cached). Raises :class:`MutationError` if a requested residue
-        is not what the packer returned."""
-        if sequence in self._cache:
-            return self._cache[sequence]
-        tokens = self._validate(sequence)
+        """Poses for ``sequence`` on the native backbone (cached). Raises :class:`MutationError`
+        if a requested residue is not what the packer returned."""
+        if sequence not in self._cache:
+            self._cache[sequence] = self.build_from(sequence, None)
+        return self._cache[sequence]
+
+    def build_from(self, sequence: str, coordinates: Tensor | None) -> MutantPoses:
+        """Pack ``sequence`` on a given backbone (not cached).
+
+        ``coordinates`` ``[n_atoms, 3]`` are in the *native topology* (the atom layout of the
+        loaded complex), e.g. a perturbed copy of ``system.reference_coordinates``; the packer then
+        builds side chains for the requested residues on that backbone. ``None`` uses the crystal
+        pose.
+        """
+        self._validate(sequence)
         tmol = _import_tmol()
+        import attr  # noqa: PLC0415  (a TMol dependency)
         from tmol import ParameterDatabase  # noqa: PLC0415
         from tmol.pack import PackerPalette, PackerTask, pack_rotamers  # noqa: PLC0415
         from tmol.pack.rotamer import FixedAAChiSampler, IncludeCurrentSampler  # noqa: PLC0415
         from tmol.pack.rotamer.dunbrack import create_dunbrack_sampler_from_database  # noqa: PLC0415
 
         pose = self.ctx.poses["complex"]
+        if coordinates is not None:
+            if tuple(coordinates.shape) != tuple(pose.coords.shape[1:]):
+                want, got = tuple(pose.coords.shape[1:]), tuple(coordinates.shape)
+                raise ValueError(f"coordinates must be {want}, got {got}")
+            pose = attr.evolve(pose, coords=coordinates.detach().to(pose.device)[None].clone())
         dev = self.ctx.device
         n_blocks = pose.max_n_blocks
         task = PackerTask(pose, PackerPalette())
@@ -173,10 +190,7 @@ class TMolSequenceBuilder:
         self._check_identities(packed, sequence)
         target, binder, t_atoms, b_atoms = self._subposes(tmol, packed, dev)
         ctx = TMolContext(packed, target, binder, t_atoms, b_atoms, dev)
-        mutant = MutantPoses(sequence, packed, target, binder, ctx)
-        self._cache[sequence] = mutant
-        del tokens
-        return mutant
+        return MutantPoses(sequence, packed, target, binder, ctx)
 
     def _check_identities(self, packed: Any, sequence: str) -> None:
         bts = packed.packed_block_types.active_block_types
@@ -209,9 +223,13 @@ class TMolSequenceBuilder:
         context and atom index sets (binder/target/CA), cached. Atom indices differ between
         sequences because mutations change atom counts, so always use this system, never the
         native one, with a mutant's coordinates."""
-        if sequence in self._systems:
-            return self._systems[sequence]
-        mutant = self.build(sequence)
+        if sequence not in self._systems:
+            self._systems[sequence] = self.system_from(self.build(sequence))
+        return self._systems[sequence]
+
+    def system_from(self, mutant: MutantPoses) -> MolecularSystem:
+        """A :class:`MolecularSystem` for any built :class:`MutantPoses` (not cached), e.g. one
+        packed on a perturbed backbone by :meth:`build_from`."""
         ctx = mutant.context
         extras = dict(self.system.extras)
         extras.update(
@@ -221,11 +239,24 @@ class TMolSequenceBuilder:
             binder_ca_atoms=_ca_atom_indices(mutant.complex, self.b_lo, self.b_hi),
             target_ca_atoms=_ca_atom_indices(mutant.complex, self.t_lo, self.t_hi),
         )
-        system = replace(
-            self.system, reference_coordinates=mutant.coordinates, move_mask=None, extras=extras
+        binder_atoms: Any = extras["binder_atoms"]
+        binder_mask = torch.zeros(mutant.coordinates.shape[0], 1)
+        binder_mask[binder_atoms.cpu()] = 1.0
+        return replace(
+            self.system,
+            reference_coordinates=mutant.coordinates,
+            move_mask=binder_mask,
+            extras=extras,
         )
-        self._systems[sequence] = system
-        return system
+
+    def write_pdb(self, sequence: str | MutantPoses, path: str | Path) -> Path:
+        """Write the packed complex of ``sequence`` (a sequence string, built on the native
+        backbone, or an already-built :class:`MutantPoses`) as a PDB with hydrogens."""
+        from cinder.energy.tmol import write_pdb  # noqa: PLC0415
+
+        if isinstance(sequence, MutantPoses):
+            return write_pdb(self.system_from(sequence), sequence.coordinates, path)
+        return write_pdb(self.system_for(sequence), self.build(sequence).coordinates, path)
 
     # ------------------------------------------------------------------------- scoring
 

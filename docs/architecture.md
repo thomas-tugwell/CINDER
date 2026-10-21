@@ -11,7 +11,7 @@ p(X | S, T)             ConformationModel     conformations/{langevin, normalizi
 U(X, S, T)              EnergyModel           energy/{toy, tmol, composite, restraints}
     │  U_k
     ▼
-R(S) = −agg_k U_k       EnsembleObjective     objectives/ensemble.py
+R(S) = −agg_k U_k       EnergyEnsembleObjective objectives/ensemble.py
     │  R
     ▼
 REINFORCE + entropy     SequenceTrainer       optimization/{reinforce, trainer}.py

@@ -1,5 +1,0 @@
-# normalizing_flow: not yet selectable through the runner (see docs/models.md).
-conformation:
-  backend: normalizing_flow
-  n_samples: 8
-  guidance_strength: 1.0

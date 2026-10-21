@@ -32,14 +32,19 @@ class LangevinSampler:
         n_steps: int = 500,
         init_std: float = 1.0,
         max_grad_norm: float | None = None,
+        noise_scale: float = 1.0,
     ) -> None:
         if step_size <= 0 or n_steps < 0:
             raise ValueError("step_size must be > 0 and n_steps >= 0")
+        if noise_scale < 0:
+            raise ValueError("noise_scale must be >= 0")
         self.score_model = score_model
         self.step_size = step_size
         self.n_steps = n_steps
         self.init_std = init_std
         self.max_grad_norm = max_grad_norm
+        # 1 = Langevin; 0 = noise-free (clipped) gradient descent, a quench to a nearby minimum
+        self.noise_scale = noise_scale
 
     @classmethod
     def from_energy(
@@ -90,7 +95,7 @@ class LangevinSampler:
             noise = torch.randn(x.shape, generator=generator, device=x.device)
             if mask is not None:
                 s, noise = s * mask, noise * mask
-            x = x + eta * s + (2 * eta) ** 0.5 * noise
+            x = x + eta * s + self.noise_scale * (2 * eta) ** 0.5 * noise
         return ConformationBatch(x.reshape(b, n_samples, *ref.shape))
 
     def log_prob(

@@ -106,3 +106,24 @@ def test_initial_coordinates_override():
     x0 = torch.tensor([5.0, -5.0])
     out = sampler.sample(system, _seq(2), 3, initial_coordinates=x0)
     assert out.coordinates.shape == (2, 3, 2) and torch.equal(out.coordinates[0, 0], x0)
+
+
+def test_noise_scale_zero_is_deterministic_gradient_descent_and_default_is_unchanged():
+    system = make_toy_system(dim=2)
+    energy = HarmonicEnergy(1.0, center=torch.tensor([3.0, -2.0]))
+    quench = LangevinSampler.from_energy(
+        energy, strength=1.0, step_size=0.05, n_steps=400, noise_scale=0.0
+    )
+    start = torch.tensor([[-4.0, 5.0]])
+    a = quench.sample(
+        system, _seq(1), 1, torch.Generator().manual_seed(0), initial_coordinates=start
+    )
+    b = quench.sample(
+        system, _seq(1), 1, torch.Generator().manual_seed(9), initial_coordinates=start
+    )
+    assert torch.equal(a.coordinates, b.coordinates)  # no randomness left
+    assert torch.allclose(a.coordinates[0, 0], torch.tensor([3.0, -2.0]), atol=1e-3)  # the minimum
+    default = LangevinSampler.from_energy(energy, step_size=0.05, n_steps=5)
+    assert default.noise_scale == 1.0
+    with pytest.raises(ValueError, match="noise_scale"):
+        LangevinSampler.from_energy(energy, noise_scale=-0.1)

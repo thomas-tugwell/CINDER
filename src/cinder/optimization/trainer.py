@@ -22,7 +22,6 @@ from cinder.types import (
     AMINO_ACIDS,
     RewardModel,
     SequenceBatch,
-    decode_sequence,
 )
 
 log = logging.getLogger("cinder.trainer")
@@ -143,10 +142,6 @@ class SequenceTrainer:
             row: dict[str, float | int] = {"iteration": it, "position": pos}
             row.update({aa: float(probs[pos_i, j]) for j, aa in enumerate(AMINO_ACIDS)})
             self._probs.write(row)
-
-    def consensus_sequence(self) -> str:
-        toks = self.policy.argmax_tokens()[None]
-        return decode_sequence(self.system.design_space.assemble(toks)[0])
 
 
 __all__ = ["SequenceTrainer", "TrainResult", "TrainerSettings"]

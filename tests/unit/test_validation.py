@@ -14,15 +14,8 @@ from cinder.validation import (
     rmsd,
     run_recovery,
 )
-from cinder.validation.perturb import rotation_matrix
 
 from ..conftest import make_toy_system
-
-
-def test_rotation_matrix_is_orthonormal_and_rotates():
-    r = rotation_matrix(torch.tensor([0.0, 0.0, 1.0]), torch.pi / 2)
-    assert torch.allclose(r @ r.T, torch.eye(3), atol=1e-6)
-    assert torch.allclose(r @ torch.tensor([1.0, 0, 0]), torch.tensor([0.0, 1, 0]), atol=1e-6)
 
 
 def test_rigid_perturb_preserves_internal_distances_and_leaves_others():

@@ -9,6 +9,7 @@ from cinder.validation.datasets import (
     fetch_pdb,
     helical_fraction,
     load_manifest,
+    resolve_complex,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -97,3 +98,25 @@ def test_chain_breaks_detects_gap(tmp_path):
     )
     assert chain_breaks(f) == {"A": [(2, 9, 36.2)]}
     assert chain_breaks(FIXTURE) == {}
+
+
+def test_resolve_complex_from_path_manifest_errors_and_breaks(tmp_path):
+    manifest = ROOT / "configs" / "benchmarks" / "helical_complexes.yaml"
+    path, t, b = resolve_complex(None, manifest, tmp_path, FIXTURE, ["A"], ["D"])
+    assert path == str(FIXTURE) and t == ["A"] and b == ["D"]
+    with pytest.raises(ValueError, match="not in"):
+        resolve_complex("ZZZZ", manifest, tmp_path, FIXTURE, ["A"], ["D"])
+    gap = tmp_path / "gap.pdb"
+    gap.write_text(
+        "\n".join(
+            [
+                _line(1, " CA ", "ALA", "A", 1, 0.0, "C"),
+                _line(2, " CA ", "ALA", "A", 9, 40.0, "C"),
+            ]
+        )
+    )
+    with pytest.raises(ValueError, match="chain breaks"):
+        resolve_complex(None, manifest, tmp_path, gap, ["A"], ["B"])
+    assert resolve_complex(None, manifest, tmp_path, gap, ["A"], ["B"], allow_breaks=True)[
+        0
+    ] == str(gap)

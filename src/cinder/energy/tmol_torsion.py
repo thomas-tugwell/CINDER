@@ -10,7 +10,7 @@ target.
 
 Only ``energy/tmol*.py`` modules import TMol; this class has the same interface as
 :class:`~cinder.systems.rigid_body.RigidBodyParametrization` (``to_cartesian``, ``dof_system``,
-``n_dofs``) so :class:`~cinder.energy.rigid_body.RigidBodyEnergy` wraps either.
+``n_dofs``) so :class:`~cinder.energy.parametrized.ParametrizedEnergy` wraps either.
 """
 
 from __future__ import annotations
