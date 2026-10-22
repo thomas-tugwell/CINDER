@@ -42,6 +42,7 @@ class PairwiseEnergyTable:
     e1: Tensor
     pairs: Tensor
     e2: Tensor
+    native: Tensor | None = None  # [P] residue index of the reference at each position
 
     def __post_init__(self) -> None:
         if self.e1.ndim != 2 or self.e1.shape[1] != N_AA:
@@ -56,6 +57,32 @@ class PairwiseEnergyTable:
     @property
     def n_positions(self) -> int:
         return int(self.e1.shape[0])
+
+    def expected_mutations(self, probs: Tensor) -> Tensor:
+        """Expected number of mutated positions: ``sum_i (1 - p_i[native_i])``."""
+        if self.native is None:
+            raise ValueError("this table has no reference residues (native) recorded")
+        pos = torch.arange(self.n_positions)
+        return (1.0 - probs[pos, self.native]).sum()
+
+    def clipped(self, cap: float) -> PairwiseEnergyTable:
+        """The table that results from clipping every substitution energy at ``cap`` above the
+        reference, i.e. scoring with ``f(U) = e0 + min(U - e0, cap)``.
+
+        Raw energies are recovered from the table (single ``e1`` and joint
+        ``e1_i + e1_j + e2``), clipped, and the inclusion-exclusion redone. This removes the
+        failure mode where one huge clash is "cancelled" by two different neighbours at once, which
+        a pairwise table then double counts and an optimiser exploits.
+        """
+        if cap <= 0:
+            raise ValueError("cap must be > 0 (energy above the reference at which to clip)")
+        e1 = self.e1.clamp(max=cap)
+        i, j = self.pairs[:, 0], self.pairs[:, 1]
+        joint = self.e1[i][:, :, None] + self.e1[j][:, None, :] + self.e2
+        e2 = joint.clamp(max=cap) - e1[i][:, :, None] - e1[j][:, None, :]
+        # entries for the reference (or unscanned) residue stay exactly 0:
+        # clamp(e1_j) - 0 - clamp(e1_j)
+        return PairwiseEnergyTable(self.e0, e1, self.pairs, e2, self.native)
 
     def energy(self, tokens: Tensor) -> Tensor:
         """Table energy of sequences ``tokens`` ``[B, P]`` (designable-position residues)."""
@@ -165,6 +192,7 @@ def tables_from_scorer(
         e1=e1.float(),
         pairs=torch.tensor(pair_list, dtype=torch.long).reshape(-1, 2),
         e2=e2.float(),
+        native=torch.tensor([AA_TO_INDEX[native[p]] for p in positions], dtype=torch.long),
     )
 
 

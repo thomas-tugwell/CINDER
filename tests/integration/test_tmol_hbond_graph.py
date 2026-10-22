@@ -142,3 +142,13 @@ def test_proposed_positions_recover_known_barstar_hotspots(system):
     assert all(0 <= p < system.design_space.length for p in both)
     with pytest.raises(ValueError, match="shells"):
         propose_design_positions(system, "third")
+
+
+def test_contact_positions_include_the_hbonded_first_shell(system):
+    """A 4.5 Å heavy-atom contact list is a superset of the cross-interface H-bond residues and
+    shrinks as the cutoff does."""
+    first = set(propose_design_positions(system, "first"))
+    contact = propose_design_positions(system, "contact")
+    assert first <= set(contact) and contact == sorted(contact)
+    tight = propose_design_positions(system, "contact", contact_cutoff=3.5)
+    assert set(tight) <= set(contact) and len(tight) < len(contact)

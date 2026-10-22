@@ -4,8 +4,11 @@ from cinder.validation.mutant_scan import (
     ScanRow,
     apply_mutations,
     correlate,
+    paired_bootstrap_spearman_difference,
+    roc_auc,
     scan_mutants,
     spearman,
+    top_fraction_enrichment,
 )
 from cinder.validation.mutation_sampling import (
     EffectSummary,
@@ -27,6 +30,9 @@ from cinder.validation.recovery import (
 )
 
 __all__ = [
+    "paired_bootstrap_spearman_difference",
+    "roc_auc",
+    "top_fraction_enrichment",
     "EffectSummary",
     "MutationSampler",
     "PositionProfile",

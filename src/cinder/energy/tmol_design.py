@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import fields
 from typing import TYPE_CHECKING, Any
 
+import torch
 from torch import Tensor
 
 from cinder.energy.composite import CompositeEnergy
@@ -91,21 +92,32 @@ def build_tmol_design_energy(ec: EnergyConfig, system: MolecularSystem) -> Compo
 
 
 def propose_design_positions(
-    system: MolecularSystem, shells: str = "both", region_cutoff: float = 8.0
+    system: MolecularSystem,
+    shells: str = "both",
+    region_cutoff: float = 8.0,
+    contact_cutoff: float = 4.5,
 ) -> list[int]:
     """Binder positions (0-based, binder-local) in the native pose's hydrogen-bond shells.
 
     ``shells``: ``first`` (binder residues bonding across the interface), ``second`` (binder
     residues that bond to a first-shell node but not across the interface) or ``both``. Uses the
-    independent hard-threshold counter on the native coordinates. Intended as a *starting list* to
-    inspect and edit, not a final design space.
+    independent hard-threshold counter on the native coordinates. ``contact`` instead takes binder
+    residues with a heavy atom within ``contact_cutoff`` Å of the target, which also finds
+    hydrophobic interfaces that have no cross-interface hydrogen bond (e.g. BH3 peptides).
+    Intended as a *starting list* to inspect and edit, not a final design space.
     """
-    if shells not in {"first", "second", "both"}:
-        raise ValueError(f"shells must be 'first', 'second' or 'both', got {shells!r}")
+    if shells not in {"first", "second", "both", "contact"}:
+        raise ValueError(f"shells must be 'first', 'second', 'both' or 'contact', got {shells!r}")
     context: TMolContext = system.extras["tmol"]  # type: ignore[assignment]
     binder_range: Any = system.extras["binder_residue_range"]
     lo, hi = int(binder_range[0]), int(binder_range[1])
     roles = polar_roles(context, region_cutoff)
+    if shells == "contact":
+        owner = roles.residue_of_atom[roles.heavy_atoms]
+        xyz = system.reference_coordinates[roles.heavy_atoms]
+        in_binder = (owner >= lo) & (owner < hi)
+        close = torch.cdist(xyz[in_binder], xyz[~in_binder]).min(dim=1).values < contact_cutoff
+        return sorted({int(r) - lo for r in owner[in_binder][close]})
     report = hard_hbond_report(system.reference_coordinates, roles)
     first, second = shell_residues(report, roles, chain=1)
     chosen = {"first": first, "second": second, "both": first + second}[shells]

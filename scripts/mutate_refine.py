@@ -36,7 +36,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--n", type=int, default=5, help="number of mutants")
     ap.add_argument("--rate", type=float, default=0.03, help="expected mutated fraction of L")
     ap.add_argument("--bias", type=float, default=9.0, help="extra weight on interface positions")
-    ap.add_argument("--shells", choices=["first", "second", "both"], default="both")
+    ap.add_argument("--shells", choices=["first", "second", "both", "contact"], default="both")
     ap.add_argument("--forbidden", default="CP")
     ap.add_argument("--torsion-noise", type=float, default=1.0, help="deg per phi/psi")
     ap.add_argument("--rigid-rotation", type=float, default=2.0, help="deg")

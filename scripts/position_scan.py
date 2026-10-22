@@ -31,7 +31,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument(
         "--positions", type=int, nargs="*", help="0-based binder indices (default: shells)"
     )
-    ap.add_argument("--shells", choices=["first", "second", "both"], default="first")
+    ap.add_argument("--shells", choices=["first", "second", "both", "contact"], default="first")
     ap.add_argument("--forbidden", default="", help="amino acids to skip as substitutions")
     ap.add_argument(
         "--structures",

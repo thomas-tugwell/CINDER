@@ -33,7 +33,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--rate", type=float, default=0.03, help="expected mutated fraction of L")
     ap.add_argument("--bias", type=float, default=9.0, help="extra weight on interface positions")
     ap.add_argument("--n", type=int, default=40, help="mutants per set")
-    ap.add_argument("--shells", choices=["first", "second", "both"], default="both")
+    ap.add_argument("--shells", choices=["first", "second", "both", "contact"], default="both")
     ap.add_argument("--forbidden", default="CP")
     ap.add_argument("--ensemble-samples", type=int, default=0, help="K; 0 = single structure only")
     ap.add_argument("--steps", type=int, default=60)

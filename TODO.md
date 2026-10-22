@@ -10,21 +10,22 @@ ensembles and a `RewardModel` interface; a TMol design loop (`cinder design`); s
 terms; design positions proposed from the shells; an autoregressive (coupled) sequence policy;
 mutant-scan tooling; PDB output; recovery benchmarks on three helical complexes.
 
-## 1. Highest priority: test the central claim on real data
+## 1. Highest priority: the ensemble hypothesis
 
-Nothing has been compared with experiment. The tooling exists (`scripts/mutant_scan.py`,
-`cinder.validation.mutant_scan`), so the blocker is data.
+Done: `scripts/skempi_validation.py` compares scores with measured SKEMPI ddG on three protease
+inhibitor complexes (see `docs/validation.md`). The energy has signal (Spearman 0.35 to 0.50, above
+a BLOSUM baseline); the ensemble is not distinguishable from the single packed structure.
 
-1. Find and vet a mutational binding dataset for complexes we can load (check its license, the
-   structures used, and the sign convention; SKEMPI is the obvious candidate but its contents and
-   license have not been verified here).
-2. Score the mutants with the single packed structure and with the jump-space ensemble; report
-   Spearman correlation with measured changes in binding, plus enrichment of the top hits (most
-   mutations are neutral or destabilising, so overall correlation is not enough).
-3. Add baselines: random ordering, a physics-free substitution score, and the same protocol with
-   `hbond`/`elec`/`hbond_graph` terms on and off.
-4. Known caveat to address: the interface energy at fixed coordinates ignores unbound-state
-   relaxation and entropy, which standard ddG protocols handle.
+Next:
+
+1. Done in part (jump-space sweep on 3SGB: all intervals contain zero, see `docs/validation.md`). Still open:
+   torsion or backbone flexibility, not only jump-space; report the paired bootstrap interval.
+2. Ablations: `hbond`/`elec`/`hbond_graph` terms on and off; fixed-coordinates interface energy
+   against a relaxed unbound state (ddG protocols include this; we do not).
+3. More complexes that do not share an inhibitor (SKEMPI has many; check mutations on both
+   partners, which needs target mutation support), and a check for SKEMPI leakage if a learned
+   model is added.
+4. SKEMPI license/terms were not located; the file is not shipped.
 
 ## 2. Validate the new terms
 
@@ -38,15 +39,19 @@ Nothing has been compared with experiment. The tooling exists (`scripts/mutant_s
 On barstar (87 residues) the refined noisy mutants end a median +121 energy units above the same
 sequence packed on the native backbone (+25 without noise); on 2ZTA (31 residues) the gap was about
 5. About one third is docking (final CA 1.2 to 2.5 Å from native), two thirds the binder's own fold.
-Next: a budget/schedule diagnostic (longer stage A and quench, colder anneal), lower and
-length-scaled noise levels, a better reference (the baseline is only Cartesian-polished, so it is
-too weak where a mutation needs the binder to adapt), and more mutants, complexes and seeds.
+A one-mutant diagnostic (see `docs/validation.md`) shows the gap scales mainly with the noise size
+(+154 at the default noise, +30 at a 0.67 Å start); a 5x longer quench helps only the internal part
+(+154 to +112) and more annealing does not help. Next: length-scaled noise levels, a refinement
+stage that can move the docking pose, a better reference (the baseline is only Cartesian-polished,
+so it is too weak where a mutation needs the binder to adapt), and more mutants, complexes, seeds.
 
 ## 2c. Pairwise-table design (exact gradients)
 
-Implemented (`scripts/table_design.py`). The barnase/barstar run (9 interface positions, contact-pruned
-pairs) had not finished when this was written, so no real-protein result is recorded yet; the only
-real-energy check so far is a 3-position 2ZTA smoke test (held-out Pearson 0.57, one contact pair).
+Implemented (`scripts/table_design.py`) but **it does not beat baselines**: on four complexes the
+table optimiser lost to the best single mutant, the one-body optimum or random search, and a greedy
+real-scorer hill climb beat it clearly on 1CDL (-14.7 vs +15.2; see `docs/sequence_optimization.md`).
+Next, in order: iterative re-fitting of the table around the
+current design (trust region), a three-body check on selected designs, a real mutational dataset.
 Open: three-body effects (the table is exact only for one- and two-body substitutions), tables on
 an ensemble or refined backbone instead of the fixed native one, scaling the pair scan (cost grows
 with contact pairs times alphabet squared), and using the table inside the `cinder design` loop.
@@ -67,7 +72,8 @@ with contact pairs times alphabet squared), and using the table inside the `cind
 * Torsion-space recovery is weaker than rigid-body recovery (see `docs/validation.md`); investigate
   correlated torsion moves, a colder final stage, or per-DOF step sizes (independent per-angle
   noise compounds like a lever).
-* Normalizing flow: toy coordinates only; diffusion, flow matching and BioEmu2 are stubs.
+* Normalizing flow, diffusion and flow matching: toy coordinates only (tested on CPU, not wired into
+  the runner); BioEmu2 is a stub (needs the installed API, weights and probably a GPU).
 * Protein-scale learned model: choose a representation (atom14, frames, torsions) and document it.
 
 ## 5. Benchmarks and evidence

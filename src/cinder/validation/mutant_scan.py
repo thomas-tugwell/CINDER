@@ -124,3 +124,51 @@ def correlate(rows: list[ScanRow], measured: Mapping[str, float]) -> dict[str, f
         raise ValueError(f"need >= 3 mutants with measurements, got {len(used)}")
     truth = [measured[r.name] for r in used]
     return {model: spearman([r.delta[model] for r in used], truth) for model in used[0].delta}
+
+
+def roc_auc(scores: list[float], labels: list[bool]) -> float:
+    """Probability that a randomly chosen positive outranks a randomly chosen negative (ties
+    count half); ``nan`` if either class is empty. ``scores``: larger = more likely positive."""
+    pos = [s for s, y in zip(scores, labels, strict=True) if y]
+    neg = [s for s, y in zip(scores, labels, strict=True) if not y]
+    if not pos or not neg:
+        return float("nan")
+    wins = sum((p > n) + 0.5 * (p == n) for p in pos for n in neg)
+    return wins / (len(pos) * len(neg))
+
+
+def top_fraction_enrichment(
+    scores: list[float], truth: list[float], fraction: float = 0.2
+) -> float:
+    """Fraction of the ``fraction`` most-destabilising measured mutants that the scores also put
+    in their top ``fraction`` (random ordering gives about ``fraction``). Larger = worse in both."""
+    n = len(scores)
+    k = max(1, round(fraction * n))
+    top_truth = set(sorted(range(n), key=lambda i: -truth[i])[:k])
+    top_scores = set(sorted(range(n), key=lambda i: -scores[i])[:k])
+    return len(top_truth & top_scores) / k
+
+
+def paired_bootstrap_spearman_difference(
+    scores_a: list[float],
+    scores_b: list[float],
+    truth: list[float],
+    n_boot: int = 1000,
+    seed: int = 0,
+) -> tuple[float, float, float]:
+    """``(rho_a - rho_b, lo, hi)``: Spearman difference against ``truth`` with a 95% percentile
+    interval from resampling mutants with replacement (the same resample for both scores)."""
+    n = len(truth)
+    if not len(scores_a) == len(scores_b) == n or n < 3:
+        raise ValueError("need three equal-length samples with at least 3 points")
+    gen = torch.Generator().manual_seed(seed)
+    a, b, t = (torch.tensor(v, dtype=torch.float64) for v in (scores_a, scores_b, truth))
+    diffs = []
+    for _ in range(n_boot):
+        idx = torch.randint(0, n, (n,), generator=gen)
+        diffs.append(
+            spearman(a[idx].tolist(), t[idx].tolist()) - spearman(b[idx].tolist(), t[idx].tolist())
+        )
+    d = torch.tensor([x for x in diffs if x == x])  # drop nan from constant resamples
+    lo, hi = torch.quantile(d, torch.tensor([0.025, 0.975])).tolist()
+    return spearman(scores_a, truth) - spearman(scores_b, truth), lo, hi

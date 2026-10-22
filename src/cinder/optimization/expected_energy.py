@@ -30,12 +30,17 @@ class ExpectedEnergySettings:
     learning_rate: float = 0.1
     alpha_start: float = 1.0  # entropy weight (temperature) at the start
     alpha_end: float = 0.01  # ... and at the end (geometric anneal)
+    mutation_cost: float = (
+        0.0  # energy charged per expected mutation (a prior toward the reference)
+    )
 
     def __post_init__(self) -> None:
         if self.iterations < 1 or self.learning_rate <= 0:
             raise ValueError("iterations >= 1 and learning_rate > 0 are required")
         if not 0 <= self.alpha_end <= self.alpha_start:
             raise ValueError("need 0 <= alpha_end <= alpha_start")
+        if self.mutation_cost < 0:
+            raise ValueError("mutation_cost must be >= 0")
 
 
 @dataclass
@@ -60,9 +65,12 @@ def optimize_expected_energy(
     ratio = (settings.alpha_end / settings.alpha_start) if settings.alpha_start > 0 else 1.0
     for it in range(n):
         alpha = settings.alpha_start * ratio ** (it / max(n - 1, 1))
-        expected = table.expected_energy(policy.marginals())
+        marginals = policy.marginals()
+        expected = table.expected_energy(marginals)
         entropy = policy.entropy()
         loss = expected - alpha * entropy
+        if settings.mutation_cost:
+            loss = loss + settings.mutation_cost * table.expected_mutations(marginals)
         opt.zero_grad()
         loss.backward()
         opt.step()

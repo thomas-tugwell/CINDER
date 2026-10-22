@@ -182,3 +182,80 @@ def test_exact_gradient_trainer_finds_the_brute_force_optimum_of_the_toy_sequenc
     assert result.table_energy == pytest.approx(float(true_energy.min()), abs=1e-3)
     assert result.expected_energy == pytest.approx(result.table_energy, abs=0.05)  # concentrated
     assert result.history[-1]["entropy"] < result.history[0]["entropy"]
+
+
+def _double_cancellation_scorer():
+    """A clash at position 1 (+1000) that is relieved by *either* neighbour (position 0 or 2) but
+    can only be relieved once: the true energy of the triple is the single-relief value, while a
+    pairwise table subtracts the relief twice (a real failure seen on barnase/barstar)."""
+
+    def score(seq: str) -> float:
+        clash = seq[1] == "E"  # E at position 1 clashes ...
+        relieved = (
+            seq[0] == "D" or seq[2] == "D"
+        )  # ... unless a neighbour is D (relief is once only)
+        return 1000.0 if clash and not relieved else (50.0 if clash else 0.0)
+
+    return score
+
+
+def test_inclusion_exclusion_double_counts_a_relief_that_can_only_happen_once():
+    score = _double_cancellation_scorer()
+    table = tables_from_scorer(score, "AAA", [0, 1, 2], [(0, 1), (1, 2)], "ADE")
+    triple = encode_sequence("DEE")[None]  # D at 0, E at 1, E at 2: still just one relief
+    true = score("DEE")
+    assert true == 50.0
+    assert float(table.energy(triple)[0]) == pytest.approx(true, abs=1e-3)  # one relief: fine
+    both = encode_sequence("DED")[None]  # D at 0 and 2: two neighbours relieve the same clash
+    assert score("DED") == 50.0
+    # the table subtracts the relief twice: 1000 - 950 - 950 = -900 instead of the true +50
+    assert float(table.energy(both)[0]) == pytest.approx(-900.0, abs=1e-3)
+
+
+def test_clipping_removes_the_spurious_cancellation():
+    score = _double_cancellation_scorer()
+    raw = tables_from_scorer(score, "AAA", [0, 1, 2], [(0, 1), (1, 2)], "ADE")
+    clipped = raw.clipped(cap=60.0)
+    both = encode_sequence("DED")[None]
+    assert float(raw.energy(both)[0]) == pytest.approx(-900.0, abs=1e-3)  # error of 950
+    # clipped at 60 the table says 60 - 10 - 10 = 40 vs the true 50: error 950 shrinks to 10
+    assert float(clipped.energy(both)[0]) == pytest.approx(40.0, abs=1e-3)
+    assert abs(float(clipped.energy(both)[0]) - score("DED")) < 0.02 * abs(
+        float(raw.energy(both)[0]) - score("DED")
+    )
+    # clipping a table equals building it from a clipped scorer
+    capped = tables_from_scorer(
+        lambda s: min(score(s), 60.0), "AAA", [0, 1, 2], [(0, 1), (1, 2)], "ADE"
+    )
+    assert torch.allclose(clipped.e1, capped.e1, atol=1e-4)
+    assert torch.allclose(clipped.e2, capped.e2, atol=1e-4)
+    assert clipped.e0 == raw.e0 and torch.equal(clipped.pairs, raw.pairs)
+    with pytest.raises(ValueError, match="cap"):
+        raw.clipped(0.0)
+
+
+def test_mutation_cost_pulls_the_policy_toward_the_reference():
+    g = torch.Generator().manual_seed(5)
+    e1 = torch.randn(3, N_AA, generator=g) * 0.1
+    native = torch.tensor([0, 0, 0])  # all 'A'
+    e1[torch.arange(3), native] = 0.0
+    table = PairwiseEnergyTable(
+        0.0, e1, torch.zeros(0, 2, dtype=torch.long), torch.zeros(0, N_AA, N_AA), native
+    )
+    free = CategoricalPolicy(_mask(3))
+    costly = CategoricalPolicy(_mask(3))
+    base = ExpectedEnergySettings(iterations=300, learning_rate=0.2, alpha_start=0.3, alpha_end=0.3)
+    optimize_expected_energy(free, table, base)
+    optimize_expected_energy(
+        costly, table, ExpectedEnergySettings(**{**base.__dict__, "mutation_cost": 2.0})
+    )
+    assert float(table.expected_mutations(costly.marginals())) < float(
+        table.expected_mutations(free.marginals())
+    )
+    assert float(table.expected_mutations(costly.marginals())) < 0.5
+    with pytest.raises(ValueError, match="native"):
+        PairwiseEnergyTable(
+            0.0, e1, torch.zeros(0, 2, dtype=torch.long), torch.zeros(0, N_AA, N_AA)
+        ).expected_mutations(free.marginals())
+    with pytest.raises(ValueError, match="mutation_cost"):
+        ExpectedEnergySettings(mutation_cost=-1.0)

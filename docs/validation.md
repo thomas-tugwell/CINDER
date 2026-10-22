@@ -1,6 +1,6 @@
 # Validation protocols
 
-Two kinds of validation exist: **analytic** (machinery vs closed forms; see the README table and
+Two kinds of validation exist: **analytic** (machinery vs closed forms; see the tables in `results.md`, reproduced by
 `scripts/validation_report.py`) and **perturb-and-recover** on real complexes (this page).
 
 ## Perturb-and-recover
@@ -194,6 +194,79 @@ interface +53 / +14, internal (binder's own energy) +79 / +15, repulsion -6 / -2
   Å from native before the quench, so part of every gap is method noise, not structural damage.
 * One complex, six mutants, one seed, one noise level, TMol as both guide and judge; nothing here
   compares with experiment.
+
+**Budget and noise diagnostic** (one mutant, `E31H`, one seed; "small noise" = torsion 0.3 degrees,
+rigid 1 degree / 0.5 Å, Cartesian 0.02 Å). Gap = final minus polished-baseline total energy.
+
+| Setting | Start CA vs native | Gap | Interface part | Internal part |
+|---|---|---|---|---|
+| default noise, default budget | 1.79 Å | +153.8 | +52.1 | +102.7 |
+| default noise, 5x quench | 1.79 Å | +111.8 | +50.1 | +63.2 |
+| default noise, 3x stage A + 5x quench | 1.79 Å | +126.0 | +46.1 | +81.0 |
+| small noise, default budget | 0.67 Å | +29.9 | +9.5 | +22.6 |
+| small noise, 5x quench | 0.67 Å | +24.9 | +9.3 | +17.3 |
+
+* The gap scales mainly with the **size of the noise**: cutting it so the start is 0.67 Å instead
+  of 1.79 Å from native reduces the gap about five-fold (+154 to +30).
+* A longer quench helps modestly and almost entirely in the binder's internal energy (+103 to +63
+  at default noise); the docking part (interface, about +50) does not move. Tripling stage A on top
+  of that did not help (+126 vs +112), so more annealing is not the lever.
+* So the shortfall is largely a property of how far the noisy start is from the basin, not of a
+  too-small step budget. Single mutant and seed: treat as a pointer for the next experiments (noise
+  scaled to binder length; a refinement stage that moves the docking pose), not as a result.
+
+## Results: measured binding changes (SKEMPI 2.0, OMTKY3 with three proteases)
+
+`scripts/skempi_validation.py` scores every single substitution on the inhibitor chain (OMTKY3,
+chain I, 56 residues) for three entries of SKEMPI 2.0 and compares with the measured change in
+binding free energy (ddG = RT ln(Kd_mut/Kd_wt), positive = weaker binding; repeats averaged).
+`single` is the mutant repacked on the native backbone; `ensemble` is the jump-space ensemble
+(K=8, 60 steps, default settings); `blosum` is a physics-free baseline (minus the BLOSUM62 score).
+SKEMPI is not shipped with the repository (download it and check its terms of use).
+
+| entry | n | score | Spearman | AUC (ddG > 1) | top-20% enrichment |
+|---|---|---|---|---|---|
+| 3SGB (SGPB) | 191 | single | +0.46 | 0.78 | 0.45 |
+| | | ensemble | +0.50 | 0.78 | 0.53 |
+| | | BLOSUM | +0.09 | 0.56 | 0.24 |
+| 1R0R (subtilisin) | 191 | single | +0.35 | 0.69 | 0.34 |
+| | | ensemble | +0.37 | 0.69 | 0.34 |
+| | | BLOSUM | +0.15 | 0.58 | 0.16 |
+| 1PPF (elastase) | 190 | single | +0.37 | 0.67 | 0.37 |
+| | | ensemble | +0.37 | 0.66 | 0.42 |
+| | | BLOSUM | +0.16 | 0.59 | 0.29 |
+
+Reading:
+
+* The TMol interface energy carries real signal about measured binding: clearly above a
+  substitution-matrix baseline on all three entries.
+* The ensemble is **not distinguishable from the single packed structure**: differences in
+  Spearman are +0.04, +0.02 and 0.00, with paired bootstrap 95% intervals
+  (-0.02, +0.10), (-0.04, +0.09) and (-0.04, +0.04), all including zero. So the central
+  hypothesis (ensemble scoring beats single-structure scoring) is **not supported** by this test,
+  and not refuted either: the ensemble here is a short jump-space ensemble with one backbone.
+* Caveats: the three entries share one inhibitor, so they are not independent; mutations are at
+  about ten contact positions with most of the effect at one (P1); only single substitutions on the
+  inhibitor were scored; no unbound-state relaxation or entropy terms (TODO); the ensemble settings
+  were not tuned.
+
+### Ensemble settings sweep (3SGB, 100 random single mutants, seed fixed)
+
+Single-structure Spearman +0.478 (AUC 0.790). Ensemble minus single, 95% paired bootstrap:
+
+| ensemble settings | ensemble Spearman | difference (interval) |
+|---|---|---|
+| 8 samples, init-std 0.3, lam 2, 60 steps (default) | not run on this subset | see full-set table above |
+| 16 samples | +0.519 | +0.041 (-0.030, +0.120) |
+| init-std 0.6 | +0.474 | -0.004 (-0.148, +0.155) |
+| lam 5, 120 steps | +0.525 | +0.047 (-0.041, +0.155) |
+| 16 samples, init-std 0.6, lam 5, 120 steps | +0.510 | +0.032 (-0.056, +0.123) |
+
+Every interval contains zero. The point estimates are mildly positive (+0.03 to +0.05) in three of
+four settings, consistent with the full-set result (+0.038 on 3SGB), but with about 100 mutants of
+one complex this cannot be told from no effect. Larger noise did not help. Verdict: the ensemble
+hypothesis is neither supported nor refuted; the test needs more complexes and a flexible-backbone
+ensemble, not more settings of the jump-space one.
 
 ## Output naming conventions
 

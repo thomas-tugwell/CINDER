@@ -91,13 +91,16 @@ with equality iff $q_\theta=p_U$. This is a reverse KL, hence mode-seeking.
 
 Forward process $X_t=\alpha_tX_0+\sigma_t\epsilon$; learned score $s_\theta(X_t,t,S,T)$;
 guided score $s_{\mathrm{guided}}=s_\theta-\lambda\nabla_X U$. Ordinary diffusion lacks a
-tractable normalised density, so `log_prob` is unsupported. *(Stub.)*
+tractable normalised density, so `log_prob` is unsupported. *(Implemented for toy coordinates; the
+guidance gradient is evaluated at the noisy state, so it is approximate.)*
 
 ## 12. Flow matching
 
 $\dfrac{dX}{dt}=v_\theta(X,t,S,T)$, heuristically guided by
 $v_{\mathrm{guided}}=v_\theta-\lambda(t)\nabla_XU$. The exact guided velocity for an arbitrary
-learned field is not this simple; treat it as a heuristic to be validated. *(Stub.)*
+learned field is not this simple; treat it as a heuristic to be validated. *(Implemented for toy
+coordinates; on a Gaussian test the guided mean moves toward the energy minimum but overshoots the
+exact tilted mean.)*
 
 ## 13. Outer sequence distribution
 

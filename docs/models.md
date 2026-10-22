@@ -6,8 +6,8 @@ All implement `ConformationModel.sample(system, sequence, n_samples)` and `log_p
 |---|---|---|
 | Langevin (energy-only or score-guided) | implemented, validated on analytic targets | unsupported |
 | Conditional RealNVP flow (toy coordinates) | implemented, validated vs. $-\log Z$ | exact |
-| Diffusion | stub | unsupported |
-| Flow matching | stub | candidate (ODE change of variables) |
+| Diffusion (VP, epsilon prediction) | implemented, toy coordinates, tested on CPU | unsupported |
+| Flow matching (OT path) | implemented, toy coordinates, tested on CPU | candidate (ODE change of variables) |
 | BioEmu2 adapter | stub, fails gracefully if absent | unsupported |
 
 ## Normalising flow
